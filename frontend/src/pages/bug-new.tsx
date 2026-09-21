@@ -203,7 +203,7 @@ export default function NewBugPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <div>
                   <Label htmlFor="env">Environment</Label>
-                  <Input id="env" value={form.environment} onChange={(e) => set('environment', e.target.value)} placeholder="Staging — staging.shop.northwind.dev" />
+                  <Input id="env" value={form.environment} onChange={(e) => set('environment', e.target.value)} placeholder="Staging - staging.shop.northwind.dev" />
                 </div>
                 <div>
                   <Label htmlFor="browser">Browser / device</Label>

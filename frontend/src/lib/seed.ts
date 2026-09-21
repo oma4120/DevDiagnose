@@ -252,7 +252,7 @@ const featuredBug: Bug = {
   ],
   expectedResult: 'API returns 422 Unprocessable Entity with a clear "cart is empty" message.',
   actualResult: 'API returns 500 Internal Server Error with an unhandled exception trace.',
-  environment: 'Staging — staging.shop.northwind.dev',
+  environment: 'Staging - staging.shop.northwind.dev',
   browserDevice: 'Chrome 128 / macOS · reproduced on Firefox 129',
   createdAt: 'Sep 14, 2026 · 09:12',
   updatedAt: '2h ago',

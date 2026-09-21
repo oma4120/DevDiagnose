@@ -1,7 +1,8 @@
 import { Link, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Activity, ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
+import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { Input, Label } from '@/components/ui/field'
+import DevDiagnoseLogo from '@/components/brand/DevDiagnoseLogo'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -22,20 +23,17 @@ export default function LoginPage() {
         <div className="absolute -right-24 -top-24 size-72 rounded-full bg-indigo/20 blur-3xl" aria-hidden />
         <div className="absolute -bottom-24 -left-16 size-72 rounded-full bg-cyan/10 blur-3xl" aria-hidden />
 
-        <div className="relative flex items-center gap-2">
-          <span className="flex size-8 items-center justify-center rounded-lg bg-indigo">
-            <Activity className="size-4.5" />
-          </span>
-          <span className="text-base font-semibold tracking-tight">DevDiagnose</span>
+        <div className="relative flex items-center">
+          <DevDiagnoseLogo light className="h-12 w-auto" />
         </div>
 
         <div className="relative max-w-md">
           <h1 className="text-3xl font-semibold leading-tight tracking-tight lg:text-4xl">
-            Turn bug reports into actionable fixes.
+            Turn bug reports into actionable fixes
           </h1>
           <p className="mt-4 text-sm leading-relaxed text-slate-300">
             AI-powered bug analysis grounded in your project&apos;s real business and technical
-            context — from evidence to diagnosis to a validated resolution.
+            context - from evidence to diagnosis to a validated resolution.
           </p>
           <div className="mt-8 flex flex-wrap gap-2">
             {['Evidence-driven', 'Project-aware AI', 'Workflow tracking'].map((t) => (
@@ -50,7 +48,7 @@ export default function LoginPage() {
         </div>
 
         <p className="relative font-mono text-xs text-slate-500">
-          Internal engineering platform · Northwind Labs
+          Internal engineering platform
         </p>
       </div>
 

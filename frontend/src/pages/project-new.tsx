@@ -136,7 +136,7 @@ export default function NewProjectPage() {
       setSubmitting(false)
     }
   }
-  const back = () => step > 1 && setStep(step - 1)
+  const back = () => (step > 1 ? setStep(step - 1) : navigate('/projects'))
 
   const updateTeam = (i: number, patch: Partial<TeamRow>) =>
     setTeam((p) => p.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
@@ -327,7 +327,7 @@ export default function NewProjectPage() {
             )}
 
             <div className="flex items-center justify-between border-t border-border pt-4">
-              <button onClick={back} disabled={step === 1} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"><ArrowLeft className="size-4" />Back</button>
+              <button onClick={back} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"><ArrowLeft className="size-4" />Back</button>
               <button onClick={next} disabled={submitting} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90 disabled:opacity-50">
                 {step === 8 ? 'Create Project' : 'Continue'}
                 {step !== 8 && <ArrowRight className="size-4" />}

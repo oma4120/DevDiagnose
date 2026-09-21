@@ -1,9 +1,7 @@
 import { Link, useLocation } from 'react-router-dom'
 import {
-  Activity,
   Bell,
   Bug,
-  ChevronDown,
   FolderKanban,
   LayoutDashboard,
   ListChecks,
@@ -15,6 +13,7 @@ import { cn } from '@/lib/utils'
 import { useRole } from '@/components/role-context'
 import { useData } from '@/lib/data-context'
 import { Avatar } from '@/components/ui/avatar'
+import DevDiagnoseLogo from '@/components/brand/DevDiagnoseLogo'
 import type { Role } from '@/lib/types'
 
 const nav: { label: string; href: string; icon: typeof Bug; roles: Role[] }[] = [
@@ -52,11 +51,8 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
       >
         {/* Logo */}
         <div className="flex h-14 items-center justify-between px-4">
-          <Link to="/dashboard" className="flex items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-md bg-indigo text-white">
-              <Activity className="size-4" />
-            </span>
-            <span className="text-sm font-semibold tracking-tight text-white">DevDiagnose</span>
+          <Link to="/dashboard" className="flex items-center">
+            <DevDiagnoseLogo light className="h-9 w-auto" />
           </Link>
           <button
             onClick={onClose}
@@ -77,7 +73,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <span className="block truncate text-xs font-medium text-white">{company.name}</span>
               <span className="block truncate text-[11px] text-slate-400">Workspace</span>
             </span>
-            <ChevronDown className="size-3.5 text-slate-400" />
           </button>
         </div>
 
@@ -136,7 +131,6 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
               <span className="block truncate text-xs font-medium text-white">{currentUser.name}</span>
               <span className="block truncate text-[11px] text-slate-400">{role}</span>
             </span>
-            <ChevronDown className="size-3.5 text-slate-400" />
           </button>
         </div>
       </aside>

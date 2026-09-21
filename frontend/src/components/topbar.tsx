@@ -2,7 +2,6 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
 import { Bell, Bug, ChevronRight, FolderPlus, Menu, Plus, Search } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { Avatar } from '@/components/ui/avatar'
 import { useData } from '@/lib/data-context'
 
 const labelMap: Record<string, string> = {
@@ -32,7 +31,7 @@ function useOutside(cb: () => void) {
 export function Topbar({ onMenu }: { onMenu: () => void }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { currentUser, notifications } = useData()
+  const { notifications } = useData()
   const [createOpen, setCreateOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
 
@@ -83,9 +82,6 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           placeholder="Search bugs, projects…"
           className="h-9 w-full rounded-lg border border-input bg-background pl-8 pr-14 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
         />
-        <kbd className="pointer-events-none absolute right-2 hidden rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground md:inline">
-          ⌘K
-        </kbd>
       </div>
 
       {/* Quick create */}
@@ -164,8 +160,6 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
           </div>
         )}
       </div>
-
-      <Avatar name={currentUser.name} color={currentUser.avatarColor} size="sm" />
     </header>
   )
 }

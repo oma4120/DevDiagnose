@@ -134,7 +134,7 @@ export default function DashboardPage() {
                 icon={Clock}
               />
               <AttentionTile
-                label="Without AI analysis"
+                label="Unanalyzed bugs"
                 count={needsAttention.noAnalysis.length}
                 tone="blue"
                 icon={Sparkles}

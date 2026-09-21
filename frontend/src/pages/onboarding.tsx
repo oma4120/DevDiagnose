@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   Building2,
@@ -13,6 +12,7 @@ import {
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { Input, Label, Select, Textarea } from '@/components/ui/field'
+import DevDiagnoseLogo from '@/components/brand/DevDiagnoseLogo'
 import type { Role } from '@/lib/types'
 
 const steps = [
@@ -41,7 +41,10 @@ export default function OnboardingPage() {
     setInvites((p) => p.map((inv, idx) => (idx === i ? { ...inv, ...patch } : inv)))
 
   const next = () => (step < 3 ? setStep(step + 1) : navigate('/dashboard'))
-  const back = () => step > 1 && setStep(step - 1)
+  const back = () => {
+    if (step > 1) setStep(step - 1)
+    else navigate('/login')
+  }
 
   const roleOptions: Role[] = hasQA ? ['Admin', 'QA', 'Developer'] : ['Admin', 'Developer']
 
@@ -49,11 +52,8 @@ export default function OnboardingPage() {
     <div className="relative min-h-dvh bg-background">
       <div className="tech-grid absolute inset-x-0 top-0 h-48 opacity-40" aria-hidden />
 
-      <header className="relative flex h-14 items-center gap-2 px-6">
-        <span className="flex size-7 items-center justify-center rounded-md bg-indigo text-white">
-          <Activity className="size-4" />
-        </span>
-        <span className="text-sm font-semibold tracking-tight">DevDiagnose</span>
+      <header className="relative flex h-14 items-center px-6">
+        <DevDiagnoseLogo className="h-10 w-auto" />
       </header>
 
       <div className="relative mx-auto max-w-2xl px-6 py-8">
@@ -148,8 +148,8 @@ export default function OnboardingPage() {
                 >
                   <span
                     className={cn(
-                      'absolute top-0.5 size-5 rounded-full bg-white shadow transition-transform',
-                      hasQA ? 'translate-x-5' : 'translate-x-0.5',
+                      'absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform',
+                      hasQA ? 'translate-x-5' : 'translate-x-0',
                     )}
                   />
                 </button>
@@ -238,8 +238,7 @@ export default function OnboardingPage() {
           <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
             <button
               onClick={back}
-              disabled={step === 1}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted disabled:opacity-40"
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
             >
               <ArrowLeft className="size-4" />
               Back
