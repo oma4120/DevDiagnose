@@ -21,7 +21,7 @@ import { StatCard } from '@/components/stat-card'
 import { Tabs } from '@/components/ui/tabs'
 import { Chip } from '@/components/badges'
 import { Avatar } from '@/components/ui/avatar'
-import { BugLine } from '@/components/bug-line'
+import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/components/role-context'
@@ -40,7 +40,7 @@ export default function ProjectOverviewPage() {
   const project = useProject(params.id)
   const { role } = useRole()
   const { toast } = useToast()
-  const { bugs, members } = useData()
+  const { bugs, members, setBugStatus } = useData()
   const [tab, setTab] = useState('overview')
 
   const projectBugs = project ? bugs.filter((b) => b.projectId === project.id) : []
@@ -145,10 +145,10 @@ export default function ProjectOverviewPage() {
             <Link to="/bugs/new" className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo px-2.5 text-xs font-medium text-white hover:bg-indigo/90"><Plus className="size-3.5" />New Bug</Link>
           </CardHeader>
           <CardContent className="p-2">
-            {projectBugs.length ? (
-              <div className="space-y-0.5">{projectBugs.map((b) => <BugLine key={b.id} bug={b} />)}</div>
-            ) : (
+            {projectBugs.length === 0 ? (
               <EmptyState icon={BugIcon} title="No bugs reported for this project." className="border-0 py-8" />
+            ) : (
+              <BugBoard bugs={projectBugs} members={members} onStatusChange={(id, status) => { void setBugStatus(id, status) }} />
             )}
           </CardContent>
         </Card>
