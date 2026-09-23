@@ -90,6 +90,8 @@ export interface Evidence {
   language?: string
   addedBy: string
   addedAt: string
+  fileUrl?: string
+  metadata?: Record<string, unknown>
 }
 
 export type CommentAuthorKind = 'QA' | 'Developer' | 'System' | 'AI'
@@ -100,6 +102,12 @@ export interface Comment {
   authorName: string
   body: string
   at: string
+}
+
+export interface SuggestedFix {
+  summary: string
+  steps: string[]
+  code: string | null
 }
 
 export interface AIAnalysis {
@@ -114,11 +122,12 @@ export interface AIAnalysis {
   rootCause: string
   explanation: string
   investigationSteps: string[]
-  suggestedFix: string
+  suggestedFix: SuggestedFix
   recommendedTests: string[]
   confidence: number
-  uncertainty: string[]
+  uncertainty: string | null
   evidenceConsidered: string[]
+  inputContext?: Record<string, unknown>
 }
 
 export interface WorkflowEvent {
@@ -153,6 +162,9 @@ export interface Bug {
   comments: Comment[]
   analyses: AIAnalysis[]
   timeline: WorkflowEvent[]
+  resolvedBy?: string
+  resolvedAt?: string
+  closedAt?: string
 }
 
 export interface NotificationItem {

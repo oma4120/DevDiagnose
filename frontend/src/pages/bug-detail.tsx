@@ -86,7 +86,8 @@ ${
 ${analysis.rootCause}
 
 Suggested fix:
-${analysis.suggestedFix}
+${analysis.suggestedFix.summary || analysis.suggestedFix.steps.join('\n')}
+${analysis.suggestedFix.code ? `\n\`\`\`\n${analysis.suggestedFix.code}\n\`\`\`` : ''}
 
 Recommended tests:
 ${analysis.recommendedTests.map((t) => `- ${t}`).join('\n')}`
@@ -455,7 +456,23 @@ export default function BugWorkspacePage() {
                       </AnalysisSection>
 
                       <AnalysisSection icon={Wand2} title="Suggested fix">
-                        <p className="text-sm leading-relaxed text-muted-foreground">{analysis.suggestedFix}</p>
+                        <p className="text-sm leading-relaxed text-muted-foreground">
+                          {analysis.suggestedFix.summary}
+                        </p>
+                        {analysis.suggestedFix.steps.length > 0 && (
+                          <ol className="mt-3 space-y-1.5">
+                            {analysis.suggestedFix.steps.map((s, i) => (
+                              <li key={i} className="flex gap-2.5 text-sm text-muted-foreground">
+                                <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-soft text-[11px] font-medium text-foreground">{i + 1}</span>{s}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                        {analysis.suggestedFix.code && (
+                          <pre className="mt-3 overflow-x-auto rounded-lg border border-border bg-navy p-3 text-xs leading-relaxed text-slate-200">
+                            <code>{analysis.suggestedFix.code}</code>
+                          </pre>
+                        )}
                       </AnalysisSection>
 
                       <AnalysisSection icon={FlaskConical} title="Recommended tests">
@@ -471,11 +488,9 @@ export default function BugWorkspacePage() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
                           <p className="text-xs font-medium uppercase tracking-wide text-amber-700">Uncertainty</p>
-                          <ul className="mt-1.5 space-y-1">
-                            {analysis.uncertainty.map((u, i) => (
-                              <li key={i} className="text-xs leading-relaxed text-amber-800">• {u}</li>
-                            ))}
-                          </ul>
+                          <p className="mt-1.5 text-xs leading-relaxed text-amber-800">
+                            {analysis.uncertainty ?? 'No open questions recorded.'}
+                          </p>
                         </div>
                         <div className="rounded-lg border border-border p-3">
                           <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Evidence considered</p>
