@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+pydantic-settings==2.7.1
+python-dotenv==1.0.1
+pymongo==4.10.1
+dnspython==2.7.0
+groq==0.14.0bcrypt==4.2.1
+PyJWT==2.10.1

@@ -16,7 +16,10 @@ frontend/.env*.local
 
 # Backend (FastAPI)
 backend/.env
-backend/__pycache__/
 backend/.venv/
+
+# Python
+__pycache__/
+*.pyc
 
 tsconfig.tsbuildinfo
