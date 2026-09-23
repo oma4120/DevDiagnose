@@ -12,6 +12,7 @@ def seed_data() -> dict:
             "email": "omar@northwind.dev",
             "avatarColor": "#6366f1",
         },
+        "invites": [],
         "company": {
             "name": "Northwind Labs",
             "workspace": "northwind",

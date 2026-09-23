@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # Invites & email
+    app_url: str = "http://localhost:5173"
+    invite_ttl_hours: int = 72
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_user: str = ""
+    smtp_password: str = ""
+    smtp_from: str = "no-reply@devdiagnose.app"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

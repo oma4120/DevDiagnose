@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import get_settings
 from app.db import get_store
 from app.deps import get_current_user
-from app.routers import auth, bugs, members, meta, notifications, projects
+from app.routers import auth, bugs, invites, members, meta, notifications, projects
 
 logging.basicConfig(level=logging.INFO)
 
@@ -21,10 +21,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Public: health and login.
+# Public: health, login, and invitation acceptance.
 public = APIRouter(prefix="/api")
 public.include_router(meta.router)
 public.include_router(auth.router)
+public.include_router(invites.router)
 
 # Everything else requires a valid Bearer token.
 private = APIRouter(prefix="/api", dependencies=[Depends(get_current_user)])

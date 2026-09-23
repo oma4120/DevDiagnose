@@ -10,8 +10,8 @@ export default function LoginPage() {
   const { login, isAuthenticated } = useData()
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [email, setEmail] = useState('sara@northwind.dev')
-  const [password, setPassword] = useState('demo1234')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
 
   if (isAuthenticated) {
@@ -86,7 +86,7 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} autoComplete="off" className="space-y-4">
             <div>
               <Label htmlFor="email">Email</Label>
               <div className="relative">
@@ -94,6 +94,7 @@ export default function LoginPage() {
                 <Input
                   id="email"
                   type="email"
+                  autoComplete="off"
                   required
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
@@ -115,6 +116,7 @@ export default function LoginPage() {
                 <Input
                   id="password"
                   type={showPassword ? 'text' : 'password'}
+                  autoComplete="new-password"
                   required
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
@@ -141,10 +143,6 @@ export default function LoginPage() {
               {!loading && <ArrowRight className="size-4" />}
             </button>
           </form>
-
-          <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-center font-mono text-xs text-muted-foreground">
-            Demo credentials — any @northwind.dev account, password <span className="font-semibold">demo1234</span>
-          </p>
         </div>
       </div>
     </div>

@@ -18,12 +18,14 @@ DevDiagnose/
 │   ├── app/main.py    App entry (CORS + public/protected router mounting)
 │   ├── app/config.py  Settings (MONGODB_URI, DB_NAME, GROQ_API_KEY, JWT_SECRET, CORS)
 │   ├── app/auth.py    bcrypt password hashing + JWT sign/verify
+│   ├── app/invites.py Invite token generation/hashing + link validation
+│   ├── app/mail.py    SMTP mailer for invitations (stdlib smtplib)
 │   ├── app/deps.py    Shared auth dependency (`get_current_user`)
 │   ├── app/db.py      Store layer (Mongo with in-memory fallback + seeding + migration)
 │   ├── app/types.py   Pydantic mirrors of the frontend TS types (responses)
 │   ├── app/schemas.py Request-body models (create/patch/comment/status/auth)
 │   ├── app/seed.py    Demo seed data (users, company, projects, bugs, …)
-│   ├── app/routers/   auth, projects, bugs, members, notifications, meta
+│   ├── app/routers/   auth, invites, projects, bugs, members, notifications, meta
 │   └── app/services/  groq.py (AI analysis via Groq)
 └── README.md
 ```
@@ -62,6 +64,17 @@ JWT_SECRET=dev-secret-change-me
 
 # CORS origins for the Vite dev server
 CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+
+# Public base URL used to build email invitation links.
+APP_URL=http://localhost:5173
+
+# SMTP settings for the "invite by email" flow. Leave SMTP_HOST empty to
+# log invitations instead of sending (handy for local development).
+SMTP_HOST=
+SMTP_PORT=587
+SMTP_USER=
+SMTP_PASSWORD=
+SMTP_FROM=no-reply@devdiagnose.app
 ```
 
 `backend/.env` is gitignored — never commit real credentials.
@@ -98,7 +111,9 @@ Open `http://localhost:5173`. Without `VITE_API_URL` the client defaults to
 
 ## Authentication
 
-All endpoints except `/api/health` and `/api/auth/login` require a JWT:
+All endpoints except `/api/health` and `/api/auth/login` require a JWT.
+Invitation acceptance (`/api/invites/*`) is also public — those endpoints are
+only reachable via the emailed token link:
 
 1. `POST /api/auth/login` with `{"email", "password"}` → `{token, user}`.
 2. Send `Authorization: Bearer <token>` on every other request.
@@ -108,6 +123,29 @@ serialized over the API). All seeded users (`*@northwind.dev`) use the demo
 password `demo1234`. The frontend keeps the token in `localStorage`
 (`dd_token`) and the login page wires into this flow; `logout` clears it and
 the route guard redirects unauthenticated users to `/login`.
+
+## Invitations
+
+Admins invite employees by email (Settings → Company) or add known employees
+by name (Team page):
+
+1. `POST /api/members {email, role}` records a pending invitation (an `invites`
+   document — **no member is created yet**) storing only a SHA-256 token hash,
+   then emails `<APP_URL>/invite/<token>` via SMTP. If `SMTP_HOST` is empty the
+   link is logged instead, and the API always returns it so the UI can copy it.
+2. The employee opens the link, sees a profile-setup form (first/last name +
+   password, validated against the invite).
+3. `POST /api/invites/accept` checks the token, expiry (default 72h) and
+   status, then creates the member with the profile + bcrypt password as
+   `Active` and marks the invitation `accepted`.
+4. The employee is redirected to `/login` and signs in with their email +
+   new password.
+
+The member only exists after step 3 — sending an invitation never creates a
+team member. Tokens are single-use and expire; a used/expired link returns
+`404`/`410`. Admins may resend as many invitations as they like to an email
+that has no member yet. `POST /api/members` and `POST /api/members/direct`
+return `403` for non-admins and `409` once that email is already a member.
 
 ## API endpoints
 
@@ -127,6 +165,10 @@ the route guard redirects unauthenticated users to `/login`.
 | POST | `/api/bugs/{id}/comments`   | Add a comment (QA/Developer/AI/System)             |
 | POST | `/api/bugs/{id}/analyze`    | Run AI analysis (Groq); 503 without `GROQ_API_KEY` |
 | GET  | `/api/members`              | Team members                                       |
+| POST | `/api/members`              | Admin: invite an employee by email → `{email, inviteLink, expiresAt, emailSent}`; emails them a `/invite/{token}` setup link (no member created yet) |
+| POST | `/api/members/direct`       | Admin: add an already-known employee by name → stored Active member, no email |
+| GET  | `/api/invites/{token}`      | Validate an invite link → `{valid, email, expiresAt, name}` — public |
+| POST | `/api/invites/accept`       | Set first/last name + password on an invited member → Active — public |
 | GET  | `/api/notifications`        | Notification list                                  |
 | POST | `/api/notifications/read-all` | Mark all notifications read                      |
 
@@ -141,7 +183,8 @@ frontend (`frontend/src/lib/types.ts`).
 
 | Collection       | Fields |
 | ---------------- | ------ |
-| `members`        | id, name, email, role (Developer/QA/Admin), avatarColor, status, assignedBugs, resolvedBugs, lastActive, **passwordHash** (bcrypt, never serialized) |
+| `members`        | id, name, firstName, lastName, email, role (Developer/QA/Admin), avatarColor, status (Active/Invited/Inactive), assignedBugs, resolvedBugs, lastActive, **passwordHash** (bcrypt, never serialized) |
+| `invites`        | id, tokenHash (SHA-256, never serialized), email, role, status (`pending`/`accepted`/`used`), createdAt, expiresAt, acceptedAt, memberId — a pending invitation; the member doc is only created on accept |
 | `projects`       | id, name, description, purpose, type, frontend[], backend[], database[], services[], auth[], deployment[], architecture, modules[], apiPatterns, environments, browsers[], platforms[], businessRules[], testingTools[], conventions, constraints, repoUrl, docsUrl, memberIds[], openBugs, highSeverity, resolvedBugs, awaitingValidation, updatedAt |
 | `bugs`           | id, ref, title, description, projectId, status (Submitted→…→Closed), severity, priority, category, reporterId, assigneeIds[], stepsToReproduce[], expectedResult, actualResult, environment, browserDevice, createdAt, updatedAt, evidence[], comments[], analyses[], timeline[], resolvedBy, resolvedAt, closedAt |
 | `bug_assignments`| id, bugId, developerId, assignedBy, assignedAt, unassignedAt, status (`active`/`completed`/`removed`) — mirrors `bugs.assigneeIds` and keeps assignment history |

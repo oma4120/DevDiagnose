@@ -35,6 +35,8 @@ export type EvidenceType =
 export interface Member {
   id: string
   name: string
+  firstName?: string
+  lastName?: string
   email: string
   role: Role
   avatarColor: string
@@ -42,6 +44,20 @@ export interface Member {
   assignedBugs: number
   resolvedBugs: number
   lastActive: string
+}
+
+export interface InviteStatus {
+  valid: boolean
+  email: string
+  expiresAt: string
+  name: string
+}
+
+export interface InviteResult {
+  email: string
+  inviteLink: string
+  expiresAt: string
+  emailSent: boolean
 }
 
 export interface BusinessRule {

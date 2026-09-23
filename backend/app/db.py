@@ -19,9 +19,10 @@ _COLLECTIONS = [
     "notifications",
     "recentActivity",
     "bug_assignments",
+    "invites",
 ]
 
-_SECRET_KEYS = {"passwordHash"}
+_SECRET_KEYS = {"passwordHash", "inviteTokenHash", "inviteSentAt", "inviteExpiresAt"}
 
 
 def public_user(doc: dict) -> dict:

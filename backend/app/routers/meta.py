@@ -1,6 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from app.db import get_store, public_user
+from app.deps import get_current_user
 
 router = APIRouter(tags=["meta"])
 
@@ -15,11 +16,13 @@ def health() -> dict:
 
 
 @private.get("/bootstrap")
-def bootstrap() -> dict:
+def bootstrap(user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
+    member = store.find_one("members", user["id"])
+    current_user = public_user(member) if member else public_user(store.current_user())
     return {
-        "currentUser": public_user(store.current_user()),
+        "currentUser": current_user,
         "company": store.company(),
         "members": [public_user(m) for m in store.find_all("members")],
         "projects": store.find_all("projects"),

@@ -4,9 +4,12 @@ import type {
   Bug,
   BugStatus,
   Comment,
+  InviteResult,
+  InviteStatus,
   Member,
   NotificationItem,
   Project,
+  Role,
 } from './types'
 
 export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
@@ -31,7 +34,7 @@ export function setToken(token: string | null): void {
 }
 
 export interface BootstrapData {
-  currentUser: { id: string; name: string; email: string; avatarColor: string }
+  currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
   company: { name: string; workspace: string; hasQA: boolean }
   members: Member[]
   projects: Project[]
@@ -100,6 +103,19 @@ export const api = {
 
   members: {
     list: () => http<Member[]>('/members'),
+    inviteByEmail: (email: string, role: Role) =>
+      http<InviteResult>('/members', { method: 'POST', body: JSON.stringify({ email, role }) }),
+    addByName: (payload: { firstName: string; lastName: string; email: string; role: Role }) =>
+      http<{ member: Member }>('/members/direct', { method: 'POST', body: JSON.stringify(payload) }),
+  },
+
+  invites: {
+    get: (token: string) => http<InviteStatus>(`/invites/${token}`),
+    accept: (payload: { token: string; firstName: string; lastName: string; password: string }) =>
+      http<{ accepted: boolean; email: string }>('/invites/accept', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
   },
 
   notifications: {

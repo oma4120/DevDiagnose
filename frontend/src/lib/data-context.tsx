@@ -12,16 +12,18 @@ import type {
   AIAnalysis,
   Bug,
   BugStatus,
+  InviteResult,
   Member,
   NotificationItem,
   Project,
+  Role,
 } from '@/lib/types'
 
 export interface DataContextValue {
   ready: boolean
   bootstrapError: string | null
   isAuthenticated: boolean
-  currentUser: { id: string; name: string; email: string; avatarColor: string }
+  currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
   company: { name: string; workspace: string; hasQA: boolean }
   members: Member[]
   projects: Project[]
@@ -31,6 +33,8 @@ export interface DataContextValue {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   refresh: () => Promise<void>
+  inviteMemberByEmail: (email: string, role: Role) => Promise<InviteResult>
+  addMemberByName: (payload: { firstName: string; lastName: string; email: string; role: Role }) => Promise<Member>
   createBug: (payload: Partial<Bug>) => Promise<Bug>
   createProject: (payload: Partial<Project>) => Promise<Project>
   addComment: (id: string, body: string, authorName?: string) => Promise<Bug>
@@ -43,7 +47,7 @@ const DataContext = createContext<DataContextValue | null>(null)
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [authToken, setAuthToken] = useState<string | null>(() => getToken())
-  const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '' })
+  const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
   const [company, setCompany] = useState({ name: '', workspace: '', hasQA: true })
   const [members, setMembers] = useState<Member[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -83,14 +87,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     const { token, user } = await api.auth.login(email, password)
     setToken(token)
     setAuthToken(token)
-    setCurrentUser({ id: user.id, name: user.name, email: user.email, avatarColor: user.avatarColor })
+    setCurrentUser({ id: user.id, name: user.name, email: user.email, avatarColor: user.avatarColor, role: user.role })
     await refresh()
   }, [refresh])
 
   const logout = useCallback(() => {
     setToken(null)
     setAuthToken(null)
-    setCurrentUser({ id: '', name: '', email: '', avatarColor: '' })
+    setCurrentUser({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
     setMembers([])
     setProjects([])
     setBugs([])
@@ -98,6 +102,21 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setRecentActivity([])
     setReady(true)
   }, [])
+
+  const inviteMemberByEmail = useCallback(async (email: string, role: Role) => {
+    const result = await api.members.inviteByEmail(email, role)
+    await refresh()
+    return result
+  }, [refresh])
+
+  const addMemberByName = useCallback(
+    async (payload: { firstName: string; lastName: string; email: string; role: Role }) => {
+      const { member } = await api.members.addByName(payload)
+      setMembers((prev) => [member, ...prev])
+      return member
+    },
+    [],
+  )
 
   const createBug = useCallback(
     async (payload: Partial<Bug>) => {
@@ -170,6 +189,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         login,
         logout,
         refresh,
+        inviteMemberByEmail,
+        addMemberByName,
         createBug,
         createProject,
         addComment,

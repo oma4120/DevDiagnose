@@ -1,6 +1,7 @@
+import re
 from uuid import uuid4
 
-from pydantic import ConfigDict, Field
+from pydantic import ConfigDict, Field, field_validator
 
 from app.types import (
     AIAnalysis,
@@ -11,6 +12,7 @@ from app.types import (
     Comment,
     Evidence,
     EvidenceType,
+    MemberRole,
     Priority,
     Project,
     Severity,
@@ -63,6 +65,40 @@ class StatusUpdate(ReqModel):
 class AuthRequest(ReqModel):
     email: str
     password: str
+
+
+class MemberCreate(ReqModel):
+    """Admin invite-by-email: create a pending member and email them a link."""
+
+    email: str = Field(min_length=3)
+    role: MemberRole = "Developer"
+
+
+class MemberDirect(ReqModel):
+    """Admin add-by-name: store an already-known employee as an active member."""
+
+    firstName: str = Field(min_length=1)
+    lastName: str = Field(min_length=1)
+    email: str = Field(min_length=3)
+    role: MemberRole = "Developer"
+
+
+class InviteAccept(ReqModel):
+    token: str = Field(min_length=24)
+    firstName: str = Field(min_length=1)
+    lastName: str = Field(min_length=1)
+    password: str = Field(min_length=8)
+
+    @field_validator("password")
+    @classmethod
+    def _password_strength(cls, value: str) -> str:
+        if not re.search(r"[A-Z]", value):
+            raise ValueError("Password needs at least one uppercase letter")
+        if not re.search(r"\d", value):
+            raise ValueError("Password needs at least one number")
+        if not re.search(r"[^A-Za-z0-9]", value):
+            raise ValueError("Password needs at least one symbol (e.g. !@#$)")
+        return value
 
 
 class BugPatch(ReqModel):

@@ -74,6 +74,8 @@ class EvidenceType(StrEnum):
 class Member(Base):
     id: str
     name: str
+    firstName: str | None = None
+    lastName: str | None = None
     email: str
     role: MemberRole
     avatarColor: str
@@ -83,6 +85,9 @@ class Member(Base):
     lastActive: str = "—"
     # Stored in the DB but never serialized over the API.
     passwordHash: str | None = Field(default=None, exclude=True)
+    inviteTokenHash: str | None = Field(default=None, exclude=True)
+    inviteSentAt: str | None = Field(default=None, exclude=True)
+    inviteExpiresAt: str | None = Field(default=None, exclude=True)
 
 
 class BugAssignment(Base):
