@@ -1,5 +1,6 @@
+import { useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { Building2, Bell, User } from 'lucide-react'
+import { ArrowRight, Building2, Bell, User } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label } from '@/components/ui/field'
@@ -37,6 +38,7 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
 
 export default function SettingsPage() {
   const [active, setActive] = useState('profile')
+  const navigate = useNavigate()
   const { role } = useRole()
   const { toast } = useToast()
   const { company, currentUser } = useData()
@@ -107,6 +109,15 @@ export default function SettingsPage() {
                   </div>
                 </div>
                 <SaveButton onClick={save} />
+                <div className="border-t border-border pt-4">
+                  <button
+                    onClick={() => navigate('/onboarding')}
+                    className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+                  >
+                    Set up a workspace
+                    <ArrowRight className="size-4" />
+                  </button>
+                </div>
               </CardContent>
             </Card>
           )}

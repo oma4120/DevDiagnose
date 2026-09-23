@@ -1,5 +1,6 @@
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom'
 import { AppShell } from '@/components/app-shell'
+import { useRole } from '@/components/role-context'
 import { useData } from '@/lib/data-context'
 import LoginPage from '@/pages/login'
 import OnboardingPage from '@/pages/onboarding'
@@ -24,11 +25,22 @@ function RequireAuth() {
   return <Outlet />
 }
 
+function RequireAdmin() {
+  const { role } = useRole()
+  const location = useLocation()
+  if (role !== 'Admin') {
+    return <Navigate to="/dashboard" replace state={{ from: location.pathname }} />
+  }
+  return <Outlet />
+}
+
 export function App() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/onboarding" element={<RequireAdmin />}>
+        <Route index element={<OnboardingPage />} />
+      </Route>
 
       <Route element={<RequireAuth />}>
         <Route element={<AppShell><Outlet /></AppShell>}>
