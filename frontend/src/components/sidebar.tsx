@@ -1,10 +1,11 @@
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
   Bug,
   FolderKanban,
   LayoutDashboard,
   ListChecks,
+  LogOut,
   Settings,
   Users,
   X,
@@ -30,8 +31,9 @@ const roles: Role[] = ['Admin', 'QA', 'Developer']
 
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { pathname } = useLocation()
+  const navigate = useNavigate()
   const { role, setRole } = useRole()
-  const { company, currentUser } = useData()
+  const { company, currentUser, logout } = useData()
   const items = nav.filter((item) => item.roles.includes(role))
 
   return (
@@ -124,13 +126,24 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         </div>
 
         {/* User */}
-        <div className="border-t border-sidebar-border p-3">
-          <button className="flex w-full items-center gap-2.5 rounded-lg px-1 py-1 text-left transition-colors hover:bg-sidebar-accent">
+        <div className="flex items-center gap-1 border-t border-sidebar-border p-3">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 py-1">
             <Avatar name={currentUser.name} color={currentUser.avatarColor} size="sm" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-white">{currentUser.name}</span>
               <span className="block truncate text-[11px] text-slate-400">{role}</span>
             </span>
+          </div>
+          <button
+            onClick={() => {
+              logout()
+              navigate('/login')
+            }}
+            className="rounded-md p-2 text-sidebar-foreground transition-colors hover:bg-sidebar-accent hover:text-white"
+            aria-label="Log out"
+            title="Log out"
+          >
+            <LogOut className="size-4 -scale-x-100" />
           </button>
         </div>
       </aside>

@@ -6,8 +6,7 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { api } from '@/lib/api'
-import * as seed from '@/lib/seed'
+import { api, getToken, setToken } from '@/lib/api'
 import type {
   ActivityItem,
   AIAnalysis,
@@ -20,7 +19,8 @@ import type {
 
 export interface DataContextValue {
   ready: boolean
-  isFallback: boolean
+  bootstrapError: string | null
+  isAuthenticated: boolean
   currentUser: { id: string; name: string; email: string; avatarColor: string }
   company: { name: string; workspace: string; hasQA: boolean }
   members: Member[]
@@ -28,6 +28,8 @@ export interface DataContextValue {
   bugs: Bug[]
   notifications: NotificationItem[]
   recentActivity: ActivityItem[]
+  login: (email: string, password: string) => Promise<void>
+  logout: () => void
   refresh: () => Promise<void>
   createBug: (payload: Partial<Bug>) => Promise<Bug>
   createProject: (payload: Partial<Project>) => Promise<Project>
@@ -40,17 +42,22 @@ export interface DataContextValue {
 const DataContext = createContext<DataContextValue | null>(null)
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const [currentUser, setCurrentUser] = useState(seed.currentUser)
-  const [company, setCompany] = useState(seed.company)
-  const [members, setMembers] = useState<Member[]>(seed.members)
-  const [projects, setProjects] = useState<Project[]>(seed.projects)
-  const [bugs, setBugs] = useState<Bug[]>(seed.bugs)
-  const [notifications, setNotifications] = useState<NotificationItem[]>(seed.notifications)
-  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>(seed.recentActivity)
+  const [authToken, setAuthToken] = useState<string | null>(() => getToken())
+  const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '' })
+  const [company, setCompany] = useState({ name: '', workspace: '', hasQA: true })
+  const [members, setMembers] = useState<Member[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [bugs, setBugs] = useState<Bug[]>([])
+  const [notifications, setNotifications] = useState<NotificationItem[]>([])
+  const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([])
   const [ready, setReady] = useState(false)
-  const [isFallback, setIsFallback] = useState(true)
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setReady(true)
+      return
+    }
     try {
       const data = await api.bootstrap()
       setCurrentUser(data.currentUser)
@@ -60,9 +67,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setBugs(data.bugs)
       setNotifications(data.notifications)
       setRecentActivity(data.recentActivity)
-      setIsFallback(false)
-    } catch {
-      setIsFallback(true)
+      setBootstrapError(null)
+    } catch (err) {
+      setBootstrapError(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
       setReady(true)
     }
@@ -71,6 +78,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  const login = useCallback(async (email: string, password: string) => {
+    const { token, user } = await api.auth.login(email, password)
+    setToken(token)
+    setAuthToken(token)
+    setCurrentUser({ id: user.id, name: user.name, email: user.email, avatarColor: user.avatarColor })
+    await refresh()
+  }, [refresh])
+
+  const logout = useCallback(() => {
+    setToken(null)
+    setAuthToken(null)
+    setCurrentUser({ id: '', name: '', email: '', avatarColor: '' })
+    setMembers([])
+    setProjects([])
+    setBugs([])
+    setNotifications([])
+    setRecentActivity([])
+    setReady(true)
+  }, [])
 
   const createBug = useCallback(
     async (payload: Partial<Bug>) => {
@@ -131,7 +158,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     <DataContext.Provider
       value={{
         ready,
-        isFallback,
+        bootstrapError,
+        isAuthenticated: Boolean(authToken),
         currentUser,
         company,
         members,
@@ -139,6 +167,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         bugs,
         notifications,
         recentActivity,
+        login,
+        logout,
         refresh,
         createBug,
         createProject,

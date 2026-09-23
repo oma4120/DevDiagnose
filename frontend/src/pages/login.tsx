@@ -1,18 +1,35 @@
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, Navigate, useNavigate } from 'react-router-dom'
 import { useState } from 'react'
-import { ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
+import { AlertCircle, ArrowRight, Eye, EyeOff, Lock, Mail } from 'lucide-react'
 import { Input, Label } from '@/components/ui/field'
 import DevDiagnoseLogo from '@/components/brand/DevDiagnoseLogo'
+import { useData } from '@/lib/data-context'
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { login, isAuthenticated } = useData()
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [email, setEmail] = useState('sara@northwind.dev')
+  const [password, setPassword] = useState('demo1234')
+  const [error, setError] = useState<string | null>(null)
 
-  const submit = (e: React.FormEvent) => {
+  if (isAuthenticated) {
+    return <Navigate to="/dashboard" replace />
+  }
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
     setLoading(true)
-    setTimeout(() => navigate('/dashboard'), 600)
+    try {
+      await login(email, password)
+      navigate('/dashboard')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Sign in failed')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -62,6 +79,13 @@ export default function LoginPage() {
             </p>
           </div>
 
+          {error && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              <AlertCircle className="size-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
           <form onSubmit={submit} className="space-y-4">
             <div>
               <Label htmlFor="email">Email</Label>
@@ -71,7 +95,8 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   required
-                  defaultValue="omar@northwind.dev"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   className="pl-8"
                 />
@@ -91,7 +116,8 @@ export default function LoginPage() {
                   id="password"
                   type={showPassword ? 'text' : 'password'}
                   required
-                  defaultValue="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
                   className="pl-8 pr-9"
                 />
@@ -106,15 +132,6 @@ export default function LoginPage() {
               </div>
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-muted-foreground">
-              <input
-                type="checkbox"
-                defaultChecked
-                className="size-4 rounded border-input text-indigo focus-visible:ring-2 focus-visible:ring-ring/30"
-              />
-              Remember me for 30 days
-            </label>
-
             <button
               type="submit"
               disabled={loading}
@@ -125,11 +142,8 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            New company?{' '}
-            <Link to="/onboarding" className="font-medium text-indigo hover:underline">
-              Set up a workspace
-            </Link>
+          <p className="mt-4 rounded-lg bg-muted px-3 py-2 text-center font-mono text-xs text-muted-foreground">
+            Demo credentials — any @northwind.dev account, password <span className="font-semibold">demo1234</span>
           </p>
         </div>
       </div>

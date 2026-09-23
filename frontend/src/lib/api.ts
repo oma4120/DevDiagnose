@@ -11,6 +11,25 @@ import type {
 
 export const API_BASE = (import.meta.env.VITE_API_URL as string | undefined) ?? '/api'
 
+const TOKEN_KEY = 'dd_token'
+
+export function getToken(): string | null {
+  try {
+    return localStorage.getItem(TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setToken(token: string | null): void {
+  try {
+    if (token) localStorage.setItem(TOKEN_KEY, token)
+    else localStorage.removeItem(TOKEN_KEY)
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export interface BootstrapData {
   currentUser: { id: string; name: string; email: string; avatarColor: string }
   company: { name: string; workspace: string; hasQA: boolean }
@@ -22,10 +41,17 @@ export interface BootstrapData {
 }
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  })
+  const token = getToken()
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (token) headers.Authorization = `Bearer ${token}`
+
+  const res = await fetch(`${API_BASE}${path}`, { headers, ...init })
+  if (res.status === 401) {
+    setToken(null)
+    if (window.location.pathname !== '/login') {
+      window.location.assign('/login')
+    }
+  }
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`
     try {
@@ -41,6 +67,14 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   bootstrap: () => http<BootstrapData>('/bootstrap'),
+
+  auth: {
+    login: (email: string, password: string) =>
+      http<{ token: string; user: Member }>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password }),
+      }),
+  },
 
   bugs: {
     list: () => http<Bug[]>('/bugs'),
