@@ -16,12 +16,13 @@ import { BarChart, DonutChart } from '@/components/bar-chart'
 import { BugLine } from '@/components/bug-line'
 import { EmptyState } from '@/components/empty-state'
 import { useRole } from '@/components/role-context'
-import { useData } from '@/lib/data-context'
+import { useData, useVisibleBugs } from '@/lib/data-context'
 import type { BugStatus, Severity } from '@/lib/types'
 
 export default function DashboardPage() {
   const { role } = useRole()
-  const { currentUser, bugs, recentActivity } = useData()
+  const { currentUser, recentActivity } = useData()
+  const bugs = useVisibleBugs(role)
 
   const total = bugs.length
   const count = (s: BugStatus) => bugs.filter((b) => b.status === s).length

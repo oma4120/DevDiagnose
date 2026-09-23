@@ -6,6 +6,7 @@ import {
   Clock,
   Folder,
   Layers,
+  Lock,
   Pencil,
   Plus,
   Server,
@@ -40,7 +41,7 @@ export default function ProjectOverviewPage() {
   const project = useProject(params.id)
   const { role } = useRole()
   const { toast } = useToast()
-  const { bugs, members, setBugStatus } = useData()
+  const { bugs, members, setBugStatus, currentUser } = useData()
   const [tab, setTab] = useState('overview')
 
   const projectBugs = project ? bugs.filter((b) => b.projectId === project.id) : []
@@ -55,6 +56,27 @@ export default function ProjectOverviewPage() {
           icon={Folder}
           title="Project not found"
           description="This project may have been deleted or the link is incorrect."
+          action={
+            <Link
+              to="/projects"
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+            >
+              Back to projects
+            </Link>
+          }
+        />
+      </div>
+    )
+  }
+
+  const isMember = role === 'Admin' || role === 'QA' || (project.memberIds ?? []).includes(currentUser.id)
+  if (!isMember) {
+    return (
+      <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
+        <EmptyState
+          icon={Lock}
+          title="Outside your workspace"
+          description="This project isn't in your workspace - ask an admin to add you to see its bugs."
           action={
             <Link
               to="/projects"

@@ -206,6 +206,24 @@ export function useProject(id: string | undefined) {
   return id ? projects.find((p) => p.id === id) : undefined
 }
 
+/**
+ * Projects the current role may open. Admins and QA see everything;
+ * Developers are scoped to projects they are a member of.
+ */
+export function useVisibleProjects(role: string): Project[] {
+  const { projects, currentUser } = useData()
+  if (role === 'Admin' || role === 'QA') return projects
+  return projects.filter((p) => p.memberIds.includes(currentUser.id))
+}
+
+/** Bugs the current role may see — all colleagues' bugs within visible projects. */
+export function useVisibleBugs(role: string): Bug[] {
+  const { bugs } = useData()
+  const visibleIds = new Set(useVisibleProjects(role).map((p) => p.id))
+  if (role === 'Admin' || role === 'QA') return bugs
+  return bugs.filter((b) => visibleIds.has(b.projectId))
+}
+
 export function useBug(id: string | undefined) {
   const { bugs } = useData()
   return id ? bugs.find((b) => b.id === id) : undefined

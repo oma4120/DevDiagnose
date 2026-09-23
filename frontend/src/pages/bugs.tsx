@@ -5,7 +5,8 @@ import { PageHeader } from '@/components/app-shell'
 import { Select } from '@/components/ui/field'
 import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
-import { useData } from '@/lib/data-context'
+import { useRole } from '@/components/role-context'
+import { useData, useVisibleBugs, useVisibleProjects } from '@/lib/data-context'
 import type { BugStatus, Category, Severity } from '@/lib/types'
 
 const statuses: (BugStatus | 'All')[] = [
@@ -32,17 +33,20 @@ const categories: (Category | 'All')[] = [
 ]
 
 export default function BugsPage() {
-  const { bugs, projects, members, setBugStatus } = useData()
+  const { role } = useRole()
+  const { members, setBugStatus } = useData()
+  const visibleProjects = useVisibleProjects(role)
+  const visibleBugs = useVisibleBugs(role)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('All')
   const [status, setStatus] = useState<(typeof statuses)[number]>('All')
   const [severity, setSeverity] = useState<(typeof severities)[number]>('All')
   const [category, setCategory] = useState<(typeof categories)[number]>('All')
 
-  const projectName = (id: string) => projects.find((p) => p.id === id)?.name
+  const projectName = (id: string) => visibleProjects.find((p) => p.id === id)?.name
 
   const filtered = useMemo(() => {
-    return bugs.filter((b) => {
+    return visibleBugs.filter((b) => {
       const matchesQuery =
         !query ||
         b.title.toLowerCase().includes(query.toLowerCase()) ||
@@ -54,13 +58,13 @@ export default function BugsPage() {
       const matchesCategory = category === 'All' || b.category === category
       return matchesQuery && matchesProject && matchesStatus && matchesSeverity && matchesCategory
     })
-  }, [query, project, status, severity, category, bugs])
+  }, [query, project, status, severity, category, visibleBugs])
 
   const boardSections = useMemo(() => {
     if (project !== 'All') {
       return [{ projectId: project, projectName: projectName(project) ?? 'Project', bugs: filtered }]
     }
-    const byProject = new Map<string, typeof bugs>()
+    const byProject = new Map<typeof visibleBugs[number]['projectId'], typeof visibleBugs>()
     for (const b of filtered) {
       const list = byProject.get(b.projectId) ?? []
       list.push(b)
@@ -71,7 +75,7 @@ export default function BugsPage() {
       projectName: projectName(projectId) ?? 'Unknown project',
       bugs: list,
     }))
-  }, [filtered, project, projects])
+  }, [filtered, project, visibleProjects])
 
   const activeFilters = [project, status, severity, category].filter((v) => v !== 'All').length + (query ? 1 : 0)
 
@@ -112,7 +116,7 @@ export default function BugsPage() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <Select value={project} onChange={(e) => setProject(e.target.value)}>
             <option value="All">All projects</option>
-            {projects.map((p) => (
+            {visibleProjects.map((p) => (
               <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </Select>
