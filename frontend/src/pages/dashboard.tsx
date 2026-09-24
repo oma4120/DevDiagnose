@@ -15,14 +15,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BarChart, DonutChart } from '@/components/bar-chart'
 import { BugLine } from '@/components/bug-line'
 import { EmptyState } from '@/components/empty-state'
-import { useRole } from '@/components/role-context'
 import { useData, useVisibleBugs } from '@/lib/data-context'
 import type { BugStatus, Severity } from '@/lib/types'
 
 export default function DashboardPage() {
-  const { role } = useRole()
   const { currentUser, recentActivity } = useData()
-  const bugs = useVisibleBugs(role)
+  const bugs = useVisibleBugs(currentUser.role)
 
   const total = bugs.length
   const count = (s: BugStatus) => bugs.filter((b) => b.status === s).length
@@ -148,7 +146,7 @@ export default function DashboardPage() {
         <div className="space-y-6">
           <Card>
             <CardHeader>
-              <CardTitle>{role === 'QA' ? 'Awaiting Validation' : 'My Work'}</CardTitle>
+              <CardTitle>{currentUser.role === 'QA' ? 'Awaiting Validation' : 'My Work'}</CardTitle>
               <Link to="/my-work" className="text-xs font-medium text-indigo hover:underline">
                 View all
               </Link>

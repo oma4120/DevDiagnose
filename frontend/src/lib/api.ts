@@ -99,14 +99,16 @@ export const api = {
     get: (id: string) => http<Project>(`/projects/${id}`),
     create: (payload: Partial<Project>) =>
       http<Project>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+    addMember: (projectId: string, memberId: string) =>
+      http<Project>(`/projects/${projectId}/members`, { method: 'POST', body: JSON.stringify({ memberId }) }),
   },
 
   members: {
     list: () => http<Member[]>('/members'),
-    inviteByEmail: (email: string, role: Role) =>
-      http<InviteResult>('/members', { method: 'POST', body: JSON.stringify({ email, role }) }),
-    addByName: (payload: { firstName: string; lastName: string; email: string; role: Role }) =>
-      http<{ member: Member }>('/members/direct', { method: 'POST', body: JSON.stringify(payload) }),
+    inviteByEmail: (payload: { email: string; role: Role; firstName?: string; lastName?: string }) =>
+      http<InviteResult>('/members', { method: 'POST', body: JSON.stringify(payload) }),
+    remove: (id: string) =>
+      http<{ deleted: boolean; id: string }>(`/members/${id}`, { method: 'DELETE' }),
   },
 
   invites: {

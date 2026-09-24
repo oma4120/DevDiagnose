@@ -35,7 +35,7 @@ def build_invite_url(token: str) -> str:
     return f"{settings.app_url.rstrip('/')}/invite/{token}"
 
 
-def new_invite_doc(store, email: str, role: str) -> tuple[dict, str]:
+def new_invite_doc(store, email: str, role: str, firstName: str = "", lastName: str = "") -> tuple[dict, str]:
     """Insert a pending invitation and return (invite_doc, raw_token)."""
     token = new_invite_token()
     existing = store.find_all("invites")
@@ -44,6 +44,8 @@ def new_invite_doc(store, email: str, role: str) -> tuple[dict, str]:
         "tokenHash": hash_invite_token(token),
         "email": email,
         "role": role,
+        "firstName": firstName.strip(),
+        "lastName": lastName.strip(),
         "status": "pending",
         "createdAt": now_iso(),
         "expiresAt": expires_at_iso(),

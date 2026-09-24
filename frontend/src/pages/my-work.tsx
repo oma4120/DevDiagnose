@@ -3,7 +3,6 @@ import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BugLine } from '@/components/bug-line'
 import { EmptyState } from '@/components/empty-state'
-import { useRole } from '@/components/role-context'
 import { useData } from '@/lib/data-context'
 import type { Bug } from '@/lib/types'
 
@@ -47,16 +46,21 @@ function Section({
 }
 
 export default function MyWorkPage() {
-  const { role } = useRole()
   const { bugs, currentUser } = useData()
   const mine = bugs.filter((b) => b.assigneeIds.includes(currentUser.id) || b.reporterId === currentUser.id)
 
-  const assigned = bugs.filter((b) => b.assigneeIds.includes(currentUser.id) && b.status === 'Assigned')
+  const assigned = bugs.filter(
+    (b) => b.assigneeIds.includes(currentUser.id) && (b.status === 'Submitted' || b.status === 'Assigned'),
+  )
   const inProgress = bugs.filter((b) => b.assigneeIds.includes(currentUser.id) && b.status === 'In Progress')
   const awaiting =
-    role === 'QA'
-      ? bugs.filter((b) => b.status === 'QA Validation')
-      : bugs.filter((b) => b.validatorId === currentUser.id && b.status === 'Resolved')
+    currentUser.role === 'QA'
+      ? bugs.filter((b) => b.status === 'QA Validation' || b.status === 'Resolved')
+      : bugs.filter(
+          (b) =>
+            (b.validatorId === currentUser.id && b.status === 'Resolved') ||
+            (b.assigneeIds.includes(currentUser.id) && b.needsAttention === true),
+        )
   const recentlyResolved = mine.filter((b) => ['Resolved', 'Closed'].includes(b.status))
 
   return (
@@ -72,7 +76,7 @@ export default function MyWorkPage() {
           icon={ListChecks}
           items={assigned}
           emptyTitle="Nothing newly assigned"
-          emptyDesc="New assignments will appear here."
+          emptyDesc="Bugs assigned to you appear here until you start work."
         />
         <Section
           title="In Progress"
@@ -82,11 +86,15 @@ export default function MyWorkPage() {
           emptyDesc="Bugs you're actively fixing show here."
         />
         <Section
-          title={role === 'QA' ? 'Awaiting Validation' : 'Awaiting My Action'}
+          title={currentUser.role === 'QA' ? 'Awaiting Validation' : 'Awaiting My Action'}
           icon={Clock}
           items={awaiting}
           emptyTitle="You're all caught up"
-          emptyDesc="Nothing is waiting on you."
+          emptyDesc={
+            currentUser.role === 'QA'
+              ? 'Resolved bugs waiting for validation appear here.'
+              : 'Rejected bugs waiting for your changes appear here.'
+          }
         />
         <Section
           title="Recently Resolved"

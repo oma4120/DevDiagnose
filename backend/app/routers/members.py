@@ -4,7 +4,7 @@ from app.db import get_store, public_user
 from app.deps import get_current_user
 from app.invites import build_invite_url, new_invite_doc
 from app.mail import send_invite_email
-from app.schemas import MemberCreate, MemberDirect, allocate_id
+from app.schemas import MemberCreate
 
 router = APIRouter(prefix="/members", tags=["members"])
 
@@ -41,8 +41,10 @@ def invite_by_email(
     email = payload.email.strip().lower()
     if store.find_one_by("members", "email", email):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{email} is already a member")
+    if any(i.get("email", "").lower() == email and i.get("status") == "pending" for i in store.find_all("invites")):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{email} already has a pending invitation")
 
-    invite, token = new_invite_doc(store, email, str(payload.role))
+    invite, token = new_invite_doc(store, email, str(payload.role), payload.firstName, payload.lastName)
     invite_url = build_invite_url(token)
     email_sent = send_invite_email(email, invite_url=invite_url)
 
@@ -54,39 +56,26 @@ def invite_by_email(
     }
 
 
-@router.post("/direct", status_code=201)
-def add_by_name(
-    payload: MemberDirect,
-    user: dict = Depends(get_current_user),
-) -> dict:
-    """Store an already-known employee as an active member (no email flow)."""
+@router.delete("/{member_id}")
+def delete_member(member_id: str, user: dict = Depends(get_current_user)) -> dict:
+    """Admin-only. Members marked `protected` (the default admin) cannot be deleted."""
     store = get_store()
     store.seed_if_empty()
     _require_admin(user)
 
-    email = payload.email.strip().lower()
-    if store.find_one_by("members", "email", email):
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"{email} is already a member")
+    member = store.find_one("members", member_id)
+    if not member:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Member not found")
+    if member.get("protected"):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This admin is protected and can't be deleted",
+        )
 
-    first = payload.firstName.strip()
-    last = payload.lastName.strip()
-    existing = store.find_all("members")
-    doc = {
-        "id": allocate_id("u", [m["id"] for m in existing]),
-        "name": f"{first} {last}".strip(),
-        "firstName": first,
-        "lastName": last,
-        "email": email,
-        "role": str(payload.role),
-        "avatarColor": _avatar_for(email),
-        "status": "Active",
-        "assignedBugs": 0,
-        "resolvedBugs": 0,
-        "lastActive": "—",
-        "passwordHash": None,
-        "inviteTokenHash": None,
-        "inviteSentAt": None,
-        "inviteExpiresAt": None,
-    }
-    store.insert("members", doc)
-    return {"member": public_user(doc)}
+    store.delete_one("members", member_id)
+    for project in store.find_all("projects"):
+        member_ids = project.get("memberIds") or []
+        if member_id in member_ids:
+            project["memberIds"] = [m for m in member_ids if m != member_id]
+            store.replace("projects", project)
+    return {"deleted": True, "id": member_id}

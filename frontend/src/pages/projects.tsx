@@ -8,12 +8,10 @@ import { Select } from '@/components/ui/field'
 import { AvatarGroup } from '@/components/ui/avatar'
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
-import { useRole } from '@/components/role-context'
 import { useData } from '@/lib/data-context'
 
 export default function ProjectsPage() {
-  const { role } = useRole()
-  const { projects, members } = useData()
+  const { projects, members, currentUser } = useData()
   const [query, setQuery] = useState('')
   const [type, setType] = useState('All')
   const [view, setView] = useState<'cards' | 'table'>('cards')
@@ -47,7 +45,7 @@ export default function ProjectsPage() {
         title="Projects"
         description="Every project holds the context the AI uses to diagnose its bugs."
         actions={
-          role === 'Admin' && (
+          currentUser.role === 'Admin' && (
             <Link
               to="/projects/new"
               className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90"

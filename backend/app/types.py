@@ -231,6 +231,7 @@ class Bug(Base):
     analyses: list[AIAnalysis] = []
     timeline: list[TimelineEntry] = []
     validatorId: str | None = None
+    needsAttention: bool = False
     resolvedBy: str | None = None
     resolvedAt: str | None = None
     closedAt: str | None = None

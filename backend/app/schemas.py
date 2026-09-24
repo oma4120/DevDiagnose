@@ -68,19 +68,12 @@ class AuthRequest(ReqModel):
 
 
 class MemberCreate(ReqModel):
-    """Admin invite-by-email: create a pending member and email them a link."""
+    """Admin invite-by-email: record an invitation (no member yet) and email a link."""
 
     email: str = Field(min_length=3)
     role: MemberRole = "Developer"
-
-
-class MemberDirect(ReqModel):
-    """Admin add-by-name: store an already-known employee as an active member."""
-
-    firstName: str = Field(min_length=1)
-    lastName: str = Field(min_length=1)
-    email: str = Field(min_length=3)
-    role: MemberRole = "Developer"
+    firstName: str = ""
+    lastName: str = ""
 
 
 class InviteAccept(ReqModel):
@@ -101,10 +94,17 @@ class InviteAccept(ReqModel):
         return value
 
 
+class ProjectMemberAdd(ReqModel):
+    """Admin adds an already-registered employee to a project team."""
+
+    memberId: str = Field(min_length=1)
+
+
 class BugPatch(ReqModel):
     status: BugStatus | None = None
     severity: Severity | None = None
     priority: Priority | None = None
+    assigneeIds: list[str] | None = None
 
 
 class ProjectCreate(ReqModel):

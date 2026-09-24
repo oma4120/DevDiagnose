@@ -126,12 +126,12 @@ the route guard redirects unauthenticated users to `/login`.
 
 ## Invitations
 
-Admins invite employees by email (Settings → Company) or add known employees
-by name (Team page):
+Admins invite employees by email (Employees page → Add employee):
 
-1. `POST /api/members {email, role}` records a pending invitation (an `invites`
-   document — **no member is created yet**) storing only a SHA-256 token hash,
-   then emails `<APP_URL>/invite/<token>` via SMTP. If `SMTP_HOST` is empty the
+1. `POST /api/members {email, role, firstName?, lastName?}` records a pending
+   invitation (an `invites` document — **no member is created yet**) storing
+   only a SHA-256 token hash plus the admin-provided first/last name, then
+   emails `<APP_URL>/invite/<token>` via SMTP. If `SMTP_HOST` is empty the
    link is logged instead, and the API always returns it so the UI can copy it.
 2. The employee opens the link, sees a profile-setup form (first/last name +
    password, validated against the invite).
@@ -143,9 +143,10 @@ by name (Team page):
 
 The member only exists after step 3 — sending an invitation never creates a
 team member. Tokens are single-use and expire; a used/expired link returns
-`404`/`410`. Admins may resend as many invitations as they like to an email
-that has no member yet. `POST /api/members` and `POST /api/members/direct`
-return `403` for non-admins and `409` once that email is already a member.
+`404`/`410`. An email with a member already has invites rejected; an email
+with a pending invitation can't be invited again. `POST /api/members`
+returns `403` for non-admins and `409` once that email is already a member or
+already has a pending invite.
 
 ## API endpoints
 
@@ -166,7 +167,6 @@ return `403` for non-admins and `409` once that email is already a member.
 | POST | `/api/bugs/{id}/analyze`    | Run AI analysis (Groq); 503 without `GROQ_API_KEY` |
 | GET  | `/api/members`              | Team members                                       |
 | POST | `/api/members`              | Admin: invite an employee by email → `{email, inviteLink, expiresAt, emailSent}`; emails them a `/invite/{token}` setup link (no member created yet) |
-| POST | `/api/members/direct`       | Admin: add an already-known employee by name → stored Active member, no email |
 | GET  | `/api/invites/{token}`      | Validate an invite link → `{valid, email, expiresAt, name}` — public |
 | POST | `/api/invites/accept`       | Set first/last name + password on an invited member → Active — public |
 | GET  | `/api/notifications`        | Notification list                                  |

@@ -31,11 +31,17 @@ def invite_status(token: str) -> dict:
     ok, reason = invite_status_of(invite)
     if not ok:
         raise HTTPException(status_code=status.HTTP_410_GONE, detail=reason)
+    first = (invite.get("firstName") or "").strip()
+    last = (invite.get("lastName") or "").strip()
+    if first or last:
+        name = f"{first} {last}".strip()
+    else:
+        name = ""
     return {
         "valid": True,
         "email": invite["email"],
         "expiresAt": invite.get("expiresAt"),
-        "name": "",
+        "name": name,
     }
 
 

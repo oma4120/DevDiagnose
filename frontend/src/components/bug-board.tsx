@@ -3,25 +3,22 @@ import { MessageSquare, Paperclip, Sparkles } from 'lucide-react'
 import { AvatarGroup } from '@/components/ui/avatar'
 import { CategoryBadge, PriorityBadge, SeverityBadge } from '@/components/badges'
 import { cn } from '@/lib/utils'
-import type { Bug, BugStatus, Member } from '@/lib/types'
+import type { Bug, Member } from '@/lib/types'
 
 export const BOARD_COLUMNS = [
-  { id: 'pending', label: 'Pending', statuses: ['Draft', 'Submitted', 'Assigned'] as BugStatus[], dot: 'bg-violet-500' },
-  { id: 'in-progress', label: 'In Progress', statuses: ['In Progress'] as BugStatus[], dot: 'bg-blue-500' },
-  { id: 'review', label: 'Review', statuses: ['QA Validation'] as BugStatus[], dot: 'bg-amber-500' },
-  { id: 'done', label: 'Done', statuses: ['Resolved', 'Closed'] as BugStatus[], dot: 'bg-emerald-500' },
+  { id: 'pending', label: 'Pending', statuses: ['Draft', 'Submitted', 'Assigned'] as Bug['status'][], dot: 'bg-violet-500' },
+  { id: 'in-progress', label: 'In Progress', statuses: ['In Progress'] as Bug['status'][], dot: 'bg-blue-500' },
+  { id: 'review', label: 'Review', statuses: ['QA Validation'] as Bug['status'][], dot: 'bg-amber-500' },
+  { id: 'done', label: 'Done', statuses: ['Resolved', 'Closed'] as Bug['status'][], dot: 'bg-emerald-500' },
 ]
-
-const allStatuses: BugStatus[] = ['Draft', 'Submitted', 'Assigned', 'In Progress', 'Resolved', 'QA Validation', 'Closed']
 
 export interface BugBoardProps {
   bugs: Bug[]
   members: Member[]
-  onStatusChange?: (id: string, status: BugStatus) => void
   className?: string
 }
 
-export function BugBoard({ bugs, members, onStatusChange, className }: BugBoardProps) {
+export function BugBoard({ bugs, members, className }: BugBoardProps) {
   return (
     <div className={cn('grid gap-3 overflow-x-auto pb-1 sm:grid-cols-2 lg:grid-cols-4', className)}>
       {BOARD_COLUMNS.map((col) => {
@@ -37,7 +34,7 @@ export function BugBoard({ bugs, members, onStatusChange, className }: BugBoardP
             </div>
             <div className="space-y-2 p-2">
               {items.map((b) => (
-                <BugBoardCard key={b.id} bug={b} members={members} onStatusChange={onStatusChange} />
+                <BugBoardCard key={b.id} bug={b} members={members} />
               ))}
               {items.length === 0 && (
                 <p className="rounded-lg border border-dashed border-border px-2 py-6 text-center text-xs text-muted-foreground">
@@ -52,15 +49,7 @@ export function BugBoard({ bugs, members, onStatusChange, className }: BugBoardP
   )
 }
 
-function BugBoardCard({
-  bug,
-  members,
-  onStatusChange,
-}: {
-  bug: Bug
-  members: Member[]
-  onStatusChange?: (id: string, status: BugStatus) => void
-}) {
+function BugBoardCard({ bug, members }: { bug: Bug; members: Member[] }) {
   const people = bug.assigneeIds
     .map((id) => members.find((m) => m.id === id))
     .filter((m): m is NonNullable<typeof m> => Boolean(m))
@@ -110,20 +99,6 @@ function BugBoardCard({
           )}
         </div>
       </div>
-      {onStatusChange && (
-        <select
-          value={bug.status}
-          onChange={(e) => onStatusChange(bug.id, e.target.value as BugStatus)}
-          aria-label={`Move ${bug.ref}`}
-          className="mt-2 h-7 w-full cursor-pointer rounded-md border border-border bg-soft px-1.5 text-[11px] font-medium text-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        >
-          {allStatuses.map((s) => (
-            <option key={s} value={s}>
-              {s}
-            </option>
-          ))}
-        </select>
-      )}
     </div>
   )
 }

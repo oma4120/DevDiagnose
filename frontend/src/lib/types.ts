@@ -44,6 +44,7 @@ export interface Member {
   assignedBugs: number
   resolvedBugs: number
   lastActive: string
+  protected?: boolean
 }
 
 export interface InviteStatus {
@@ -167,6 +168,7 @@ export interface Bug {
   reporterId: string
   assigneeIds: string[]
   validatorId?: string
+  needsAttention?: boolean
   stepsToReproduce: string[]
   expectedResult: string
   actualResult: string

@@ -5,7 +5,6 @@ import { PageHeader } from '@/components/app-shell'
 import { Select } from '@/components/ui/field'
 import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
-import { useRole } from '@/components/role-context'
 import { useData, useVisibleBugs, useVisibleProjects } from '@/lib/data-context'
 import type { BugStatus, Category, Severity } from '@/lib/types'
 
@@ -33,10 +32,9 @@ const categories: (Category | 'All')[] = [
 ]
 
 export default function BugsPage() {
-  const { role } = useRole()
-  const { members, setBugStatus } = useData()
-  const visibleProjects = useVisibleProjects(role)
-  const visibleBugs = useVisibleBugs(role)
+  const { members, currentUser } = useData()
+  const visibleProjects = useVisibleProjects(currentUser.role)
+  const visibleBugs = useVisibleBugs(currentUser.role)
   const [query, setQuery] = useState('')
   const [project, setProject] = useState('All')
   const [status, setStatus] = useState<(typeof statuses)[number]>('All')
@@ -169,11 +167,7 @@ export default function BugsPage() {
                   Open project
                 </Link>
               </div>
-              <BugBoard
-                bugs={sectionBugs}
-                members={members}
-                onStatusChange={(id, status) => { void setBugStatus(id, status) }}
-              />
+              <BugBoard bugs={sectionBugs} members={members} />
             </section>
           ))}
         </div>

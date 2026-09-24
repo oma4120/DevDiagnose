@@ -110,7 +110,7 @@ def run_analysis(bug: dict, project: dict) -> dict:
                 },
             ],
             temperature=0.2,
-            max_tokens=1800,
+            max_tokens=2800,
         )
     except Exception as exc:  # noqa: BLE001
         raise GroqAnalyzerError(f"Groq request failed: {exc}") from exc
@@ -125,6 +125,7 @@ def run_analysis(bug: dict, project: dict) -> dict:
         raise GroqAnalyzerError("Groq returned unparseable JSON.") from exc
 
     raw.setdefault("model", settings.groq_model)
+    raw["model"] = settings.groq_model
     raw.setdefault("classification", bug.get("category", "Unknown"))
     raw.setdefault("severityRec", bug.get("severity", "Medium"))
     raw.setdefault("priorityRec", bug.get("priority", "Medium"))

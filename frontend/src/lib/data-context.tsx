@@ -25,6 +25,8 @@ export interface DataContextValue {
   isAuthenticated: boolean
   currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
   company: { name: string; workspace: string; hasQA: boolean }
+  hasQA: boolean
+  setHasQA: (value: boolean) => void
   members: Member[]
   projects: Project[]
   bugs: Bug[]
@@ -33,12 +35,14 @@ export interface DataContextValue {
   login: (email: string, password: string) => Promise<void>
   logout: () => void
   refresh: () => Promise<void>
-  inviteMemberByEmail: (email: string, role: Role) => Promise<InviteResult>
-  addMemberByName: (payload: { firstName: string; lastName: string; email: string; role: Role }) => Promise<Member>
+  inviteMemberByEmail: (email: string, role: Role, firstName?: string, lastName?: string) => Promise<InviteResult>
+  removeMember: (id: string) => Promise<void>
+  addProjectMember: (projectId: string, memberId: string) => Promise<Project>
   createBug: (payload: Partial<Bug>) => Promise<Bug>
   createProject: (payload: Partial<Project>) => Promise<Project>
   addComment: (id: string, body: string, authorName?: string) => Promise<Bug>
   setBugStatus: (id: string, status: BugStatus) => Promise<Bug>
+  assignBug: (id: string, assigneeIds: string[]) => Promise<Bug>
   analyzeBug: (id: string) => Promise<AIAnalysis>
   markAllNotificationsRead: () => Promise<NotificationItem[]>
 }
@@ -49,6 +53,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [authToken, setAuthToken] = useState<string | null>(() => getToken())
   const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
   const [company, setCompany] = useState({ name: '', workspace: '', hasQA: true })
+  const [hasQA, setHasQA] = useState(true)
   const [members, setMembers] = useState<Member[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [bugs, setBugs] = useState<Bug[]>([])
@@ -103,20 +108,22 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setReady(true)
   }, [])
 
-  const inviteMemberByEmail = useCallback(async (email: string, role: Role) => {
-    const result = await api.members.inviteByEmail(email, role)
+  const inviteMemberByEmail = useCallback(async (email: string, role: Role, firstName = '', lastName = '') => {
+    const result = await api.members.inviteByEmail({ email, role, firstName, lastName })
     await refresh()
     return result
   }, [refresh])
 
-  const addMemberByName = useCallback(
-    async (payload: { firstName: string; lastName: string; email: string; role: Role }) => {
-      const { member } = await api.members.addByName(payload)
-      setMembers((prev) => [member, ...prev])
-      return member
-    },
-    [],
-  )
+  const removeMember = useCallback(async (id: string) => {
+    await api.members.remove(id)
+    await refresh()
+  }, [refresh])
+
+  const addProjectMember = useCallback(async (projectId: string, memberId: string) => {
+    const updated = await api.projects.addMember(projectId, memberId)
+    setProjects((prev) => prev.map((p) => (p.id === projectId ? updated : p)))
+    return updated
+  }, [])
 
   const createBug = useCallback(
     async (payload: Partial<Bug>) => {
@@ -148,7 +155,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const setBugStatus = useCallback(async (id: string, status: BugStatus) => {
     const bug = await api.bugs.setStatus(id, status)
-    setBugs((prev) => prev.map((b) => (b.id === bug.id ? bug : b)))
+    setBugs((prev) => prev.map((b) => (b.id === id ? bug : b)))
+    return bug
+  }, [])
+
+  const assignBug = useCallback(async (id: string, assigneeIds: string[]) => {
+    const bug = await api.bugs.patch(id, { assigneeIds })
+    setBugs((prev) => prev.map((b) => (b.id === id ? bug : b)))
     return bug
   }, [])
 
@@ -181,6 +194,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
         isAuthenticated: Boolean(authToken),
         currentUser,
         company,
+        hasQA,
+        setHasQA,
         members,
         projects,
         bugs,
@@ -190,11 +205,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
         logout,
         refresh,
         inviteMemberByEmail,
-        addMemberByName,
+        removeMember,
+        addProjectMember,
         createBug,
         createProject,
         addComment,
         setBugStatus,
+        assignBug,
         analyzeBug,
         markAllNotificationsRead,
       }}
@@ -228,12 +245,12 @@ export function useProject(id: string | undefined) {
 }
 
 /**
- * Projects the current role may open. Admins and QA see everything;
- * Developers are scoped to projects they are a member of.
+ * Projects the current role may open. Admins see everything;
+ * QA and Developers are scoped to projects they are a member of.
  */
 export function useVisibleProjects(role: string): Project[] {
   const { projects, currentUser } = useData()
-  if (role === 'Admin' || role === 'QA') return projects
+  if (role === 'Admin') return projects
   return projects.filter((p) => p.memberIds.includes(currentUser.id))
 }
 
@@ -241,7 +258,7 @@ export function useVisibleProjects(role: string): Project[] {
 export function useVisibleBugs(role: string): Bug[] {
   const { bugs } = useData()
   const visibleIds = new Set(useVisibleProjects(role).map((p) => p.id))
-  if (role === 'Admin' || role === 'QA') return bugs
+  if (role === 'Admin') return bugs
   return bugs.filter((b) => visibleIds.has(b.projectId))
 }
 

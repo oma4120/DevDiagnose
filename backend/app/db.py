@@ -1,5 +1,4 @@
 import logging
-import threading
 from copy import deepcopy
 from uuid import uuid4
 
@@ -28,64 +27,6 @@ _SECRET_KEYS = {"passwordHash", "inviteTokenHash", "inviteSentAt", "inviteExpire
 def public_user(doc: dict) -> dict:
     """Drop credential fields before a document leaves the API."""
     return {k: v for k, v in doc.items() if k not in _SECRET_KEYS}
-
-
-class MemoryStore:
-    """In-memory fallback when MongoDB is unavailable. Seeded from seed.py."""
-
-    def __init__(self) -> None:
-        data = seed_data()
-        self._collections: dict[str, list[dict]] = {}
-        self._lock = threading.Lock()
-        for coll in _COLLECTIONS:
-            self._collections[coll] = deepcopy(data.get(coll, []))
-
-    def count(self, coll: str) -> int:
-        return len(self._collections.get(coll, []))
-
-    def find_all(self, coll: str) -> list[dict]:
-        with self._lock:
-            return deepcopy(self._collections.get(coll, []))
-
-    def find_one(self, coll: str, doc_id: str) -> dict | None:
-        with self._lock:
-            for doc in self._collections.get(coll, []):
-                if doc.get("id") == doc_id:
-                    return deepcopy(doc)
-        return None
-
-    def find_one_by(self, coll: str, field: str, value: str) -> dict | None:
-        with self._lock:
-            for doc in self._collections.get(coll, []):
-                if str(doc.get(field, "")).lower() == str(value).lower():
-                    return deepcopy(doc)
-        return None
-
-    def insert(self, coll: str, doc: dict) -> dict:
-        with self._lock:
-            self._collections.setdefault(coll, []).append(deepcopy(doc))
-        return deepcopy(doc)
-
-    def replace(self, coll: str, doc: dict) -> dict:
-        with self._lock:
-            col = self._collections.setdefault(coll, [])
-            for i, existing in enumerate(col):
-                if existing.get("id") == doc.get("id"):
-                    col[i] = deepcopy(doc)
-                    return deepcopy(doc)
-            col.append(deepcopy(doc))
-            return deepcopy(doc)
-
-    def delete_all(self, coll: str) -> None:
-        with self._lock:
-            self._collections[coll] = []
-
-    def mark_all_read(self) -> list[dict]:
-        with self._lock:
-            col = self._collections.setdefault("notifications", [])
-            for n in col:
-                n["read"] = True
-            return deepcopy(col)
 
 
 class MongoStore:
@@ -132,6 +73,9 @@ class MongoStore:
         self._db[coll].replace_one({"_id": doc["id"]}, {**doc, "_id": doc["id"]}, upsert=True)
         return deepcopy(doc)
 
+    def delete_one(self, coll: str, doc_id: str) -> None:
+        self._db[coll].delete_one({"_id": doc_id})
+
     def delete_all(self, coll: str) -> None:
         self._db[coll].delete_many({})
 
@@ -146,9 +90,9 @@ class MongoStore:
 
 
 class Store:
-    """Facade over the memory or Mongo backend, plus a shared seed routine."""
+    """Facade over MongoDB, plus a shared seed routine."""
 
-    def __init__(self, backend: MongoStore | MemoryStore) -> None:
+    def __init__(self, backend: MongoStore) -> None:
         self.backend = backend
         self.seeded = False
         self._seed_payload = seed_data()
@@ -257,6 +201,9 @@ class Store:
     def replace(self, coll: str, doc: dict) -> dict:
         return self.backend.replace(coll, doc)
 
+    def delete_one(self, coll: str, doc_id: str) -> None:
+        self.backend.delete_one(coll, doc_id)
+
     def mark_all_read(self) -> list[dict]:
         return self.backend.mark_all_read()
 
@@ -273,16 +220,22 @@ def get_store() -> Store:
 
 def _connect() -> Store:
     settings = get_settings()
-    if settings.mongo_uri:
+    if not settings.mongo_uri:
+        raise RuntimeError(
+            "MONGODB_URI is not set. All data must live in MongoDB Atlas; "
+            "set MONGODB_URI in backend/.env before starting."
+        )
+    last_exc: Exception | None = None
+    for attempt in range(1, 4):
         try:
-            client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=3000)
-            # Force a connection to validate credentials/network.
+            client = MongoClient(settings.mongo_uri, serverSelectionTimeoutMS=5000)
             client.admin.command("ping")
             store = Store(MongoStore(client, settings.db_name))
             logger.info("Connected to MongoDB at %s", settings.mongo_uri.split("@")[-1])
             return store
-        except (ServerSelectionTimeoutError, PyMongoError, Exception) as exc:  # noqa: BLE001
-            logger.warning("MongoDB unavailable (%s); using in-memory fallback store.", exc)
-    else:
-        logger.warning("MONGODB_URI not set; using in-memory fallback store.")
-    return Store(MemoryStore())
+        except Exception as exc:  # noqa: BLE001
+            last_exc = exc
+            logger.warning("MongoDB attempt %d/3 failed: %s", attempt, exc)
+    raise RuntimeError(
+        "Could not connect to MongoDB Atlas; refusing to fall back to local storage."
+    ) from last_exc

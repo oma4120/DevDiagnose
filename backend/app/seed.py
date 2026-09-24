@@ -21,10 +21,11 @@ def seed_data() -> dict:
         "members": [
             {"id": "u1", "name": "Omar Haddad", "email": "omar@northwind.dev", "role": "Developer", "avatarColor": "#6366f1", "status": "Active", "assignedBugs": 5, "resolvedBugs": 34, "lastActive": "2m ago"},
             {"id": "u2", "name": "Sara Nasser", "email": "sara@northwind.dev", "role": "QA", "avatarColor": "#06b6d4", "status": "Active", "assignedBugs": 8, "resolvedBugs": 12, "lastActive": "15m ago"},
-            {"id": "u3", "name": "Lena Fischer", "email": "lena@northwind.dev", "role": "Admin", "avatarColor": "#f59e0b", "status": "Active", "assignedBugs": 0, "resolvedBugs": 3, "lastActive": "1h ago"},
+            {"id": "u3", "name": "Lena Fischer", "email": "lena@northwind.dev", "role": "Developer", "avatarColor": "#f59e0b", "status": "Active", "assignedBugs": 0, "resolvedBugs": 3, "lastActive": "1h ago"},
             {"id": "u4", "name": "Marcus Reed", "email": "marcus@northwind.dev", "role": "Developer", "avatarColor": "#10b981", "status": "Active", "assignedBugs": 4, "resolvedBugs": 27, "lastActive": "3h ago"},
             {"id": "u5", "name": "Priya Shah", "email": "priya@northwind.dev", "role": "Developer", "avatarColor": "#3b82f6", "status": "Active", "assignedBugs": 6, "resolvedBugs": 41, "lastActive": "Yesterday"},
             {"id": "u6", "name": "Tomas Vidal", "email": "tomas@northwind.dev", "role": "QA", "avatarColor": "#ef4444", "status": "Invited", "assignedBugs": 0, "resolvedBugs": 0, "lastActive": "—"},
+            {"id": "u7", "name": "Ahmad Tester", "email": "ahmad25tester@gmail.com", "role": "Admin", "avatarColor": "#8b5cf6", "status": "Active", "assignedBugs": 0, "resolvedBugs": 0, "lastActive": "1h ago", "protected": True},
         ],
         "projects": [
             {

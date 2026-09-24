@@ -43,7 +43,6 @@ def _sync_assignments(
 ) -> None:
     """Reconcile bug_assignments records so they mirror bug.assigneeIds."""
     store = get_store()
-    names = _member_names()
     old_ids = previous_ids if previous_ids is not None else list(bug.get("assigneeIds", []))
 
     for doc in store.find_all("bug_assignments"):
@@ -73,12 +72,18 @@ def _sync_assignments(
         )
         _push_notification(
             "Assignment",
-            f"Bug {bug['ref']} was assigned to {names.get(dev_id, dev_id)}.",
+            f"Bug {bug['ref']} was assigned to you.",
             bug["ref"],
+            user_ids=[dev_id],
         )
 
 
-def _push_notification(category: str, message: str, bug_ref: str | None = None) -> dict:
+def _push_notification(
+    category: str,
+    message: str,
+    bug_ref: str | None = None,
+    user_ids: list[str] | None = None,
+) -> dict:
     store = get_store()
     docs = store.find_all("notifications")
     note = {
@@ -89,6 +94,8 @@ def _push_notification(category: str, message: str, bug_ref: str | None = None) 
         "read": False,
         "bugRef": bug_ref,
     }
+    if user_ids:
+        note["userIds"] = user_ids
     store.insert("notifications", note)
     return note
 
@@ -123,6 +130,13 @@ def get_bug(bug_id: str) -> dict:
 def create_bug(payload: BugCreate, user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
+
+    project = store.find_one("projects", payload.projectId)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {payload.projectId} not found")
+    if user.get("role") != "Admin" and user.get("id") not in (project.get("memberIds") or []):
+        raise HTTPException(status_code=403, detail="You don't have access to this project")
+
     bugs = store.find_all("bugs")
     bug_id, ref = current_bug_ref(bugs)
     names = _member_names()
@@ -168,6 +182,18 @@ def patch_bug(bug_id: str, payload: BugPatch, user: dict = Depends(get_current_u
         raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
 
     updates = payload.model_dump(exclude_none=True)
+
+    if "assigneeIds" in updates:
+        project = store.find_one("projects", bug.get("projectId", ""))
+        team = set(project.get("memberIds") or []) if project else set()
+        if any(member_id not in team for member_id in updates["assigneeIds"]):
+            raise HTTPException(
+                status_code=400,
+                detail="Assignees must come from the project team",
+            )
+        if updates["assigneeIds"] and "status" not in updates and bug.get("status") == "Submitted":
+            updates["status"] = "Assigned"
+
     old_status = bug.get("status")
     old_assignees = list(bug.get("assigneeIds", []))
     now = _now()
@@ -184,17 +210,43 @@ def patch_bug(bug_id: str, payload: BugPatch, user: dict = Depends(get_current_u
             kind = "resolved"
         elif updates["status"] == "Closed":
             kind = "closed"
+        rejected = updates["status"] == "In Progress" and old_status in ("Resolved", "QA Validation")
         timeline.append(
             TimelineEntry(
                 id=_new_id("t", timeline),
                 kind=kind,
-                label=f"Moved to {updates['status']}",
+                label="Rejected — needs changes" if rejected else f"Moved to {updates['status']}",
                 actor=actor_name,
                 at=now,
             ).model_dump(mode="json")
         )
         bug["timeline"] = timeline
         _push_notification("System", f"Bug {bug['ref']} moved to {updates['status']}.", bug["ref"])
+        if updates["status"] in ("Resolved", "QA Validation"):
+            project = store.find_one("projects", bug.get("projectId", ""))
+            team = set(project.get("memberIds") or []) if project else set()
+            all_members = store.find_all("members")
+            qa_ids = [m["id"] for m in all_members if m.get("role") == "QA"]
+            targets = [q for q in qa_ids if q in team] or qa_ids
+            if targets:
+                _push_notification(
+                    "Validation",
+                    f"Bug {bug['ref']} is awaiting your validation.",
+                    bug["ref"],
+                    user_ids=targets,
+                )
+        if rejected:
+            bug["needsAttention"] = True
+            rejections = [a for a in (bug.get("assigneeIds") or []) if a]
+            if rejections:
+                _push_notification(
+                    "Validation",
+                    f"Bug {bug['ref']} was rejected — it needs your attention.",
+                    bug["ref"],
+                    user_ids=rejections,
+                )
+        else:
+            bug["needsAttention"] = False
         if updates["status"] == "Resolved":
             if not bug.get("resolvedAt"):
                 bug["resolvedBy"] = user["id"]
@@ -216,7 +268,7 @@ def patch_bug(bug_id: str, payload: BugPatch, user: dict = Depends(get_current_u
             ).model_dump(mode="json")
         )
         bug["timeline"] = timeline
-        _sync_assignments(bug, list(updates["assigneeIds"]), user, now)
+        _sync_assignments(bug, list(updates["assigneeIds"]), user, now, previous_ids=old_assignees)
 
     cleaned = Bug.model_validate(bug).model_dump(mode="json")
     store.replace("bugs", cleaned)
@@ -229,7 +281,11 @@ def set_status(bug_id: str, payload: StatusUpdate, user: dict = Depends(get_curr
 
 
 @router.post("/{bug_id}/comments")
-def add_comment(bug_id: str, payload: CommentIn) -> dict:
+def add_comment(
+    bug_id: str,
+    payload: CommentIn,
+    user: dict = Depends(get_current_user),
+) -> dict:
     store = get_store()
     store.seed_if_empty()
     bug = store.find_one("bugs", bug_id)
@@ -260,7 +316,15 @@ def add_comment(bug_id: str, payload: CommentIn) -> dict:
     bug["updatedAt"] = "just now"
     cleaned = Bug.model_validate(bug).model_dump(mode="json")
     store.replace("bugs", cleaned)
-    _push_notification("System", f"{payload.authorName} commented on Bug {bug['ref']}.", bug["ref"])
+    targets = {bug.get("reporterId"), *bug.get("assigneeIds", [])}
+    targets.discard(None)
+    targets.discard(user.get("id"))
+    _push_notification(
+        "System",
+        f"{payload.authorName} commented on Bug {bug['ref']}.",
+        bug["ref"],
+        user_ids=sorted(targets) if targets else None,
+    )
     return cleaned
 
 

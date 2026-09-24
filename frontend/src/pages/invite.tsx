@@ -31,6 +31,9 @@ export default function InvitePage() {
       .then((info) => {
         if (!alive) return
         setEmail(info.email)
+        const parts = (info.name || '').trim().split(/\s+/)
+        setFirstName(parts[0] || '')
+        setLastName(parts.slice(1).join(' '))
         setPhase('ready')
       })
       .catch(() => {

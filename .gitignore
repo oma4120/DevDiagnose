@@ -17,6 +17,7 @@ frontend/.env*.local
 # Backend (FastAPI)
 backend/.env
 backend/.venv/
+backend/data/
 
 # Python
 __pycache__/

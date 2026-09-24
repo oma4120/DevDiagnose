@@ -17,7 +17,7 @@ import { Input, Label, Select, Textarea, FieldHint, MonoTextarea } from '@/compo
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
-import { useData } from '@/lib/data-context'
+import { useData, useVisibleProjects } from '@/lib/data-context'
 import type { Category, EvidenceType, Priority, Severity } from '@/lib/types'
 
 const evidenceTypes: EvidenceType[] = [
@@ -55,10 +55,11 @@ const codeLikeTypes: EvidenceType[] = ['Console Error', 'API Response', 'Server 
 export default function NewBugPage() {
   const navigate = useNavigate()
   const { toast } = useToast()
-  const { projects, currentUser, createBug, analyzeBug } = useData()
+  const { currentUser, createBug, analyzeBug } = useData()
+  const visibleProjects = useVisibleProjects(currentUser.role)
 
   const [form, setForm] = useState({
-    projectId: projects[0]?.id ?? '',
+    projectId: visibleProjects[0]?.id ?? '',
     title: '',
     description: '',
     stepsToReproduce: '',
@@ -167,7 +168,11 @@ export default function NewBugPage() {
               <div>
                 <Label htmlFor="project">Project</Label>
                 <Select id="project" value={form.projectId} onChange={(e) => set('projectId', e.target.value)}>
-                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  {visibleProjects.length === 0 ? (
+                    <option value="" disabled>No accessible projects — ask an admin to add you to a team</option>
+                  ) : (
+                    visibleProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)
+                  )}
                 </Select>
                 <FieldHint>Determines which context the AI uses to diagnose this bug.</FieldHint>
               </div>

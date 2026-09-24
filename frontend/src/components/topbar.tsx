@@ -1,6 +1,6 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useEffect, useRef, useState } from 'react'
-import { Bell, Bug, ChevronRight, FolderPlus, Menu, Plus, Search } from 'lucide-react'
+import { Bell, Bug, ChevronRight, FolderPlus, Menu, Plus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useData } from '@/lib/data-context'
 
@@ -9,7 +9,7 @@ const labelMap: Record<string, string> = {
   projects: 'Projects',
   bugs: 'Bugs',
   'my-work': 'My Work',
-  team: 'Team',
+  employees: 'Employees',
   notifications: 'Notifications',
   settings: 'Settings',
   new: 'New',
@@ -31,7 +31,7 @@ function useOutside(cb: () => void) {
 export function Topbar({ onMenu }: { onMenu: () => void }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { notifications } = useData()
+  const { notifications, currentUser } = useData()
   const [createOpen, setCreateOpen] = useState(false)
   const [notifOpen, setNotifOpen] = useState(false)
 
@@ -75,17 +75,8 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
         })}
       </nav>
 
-      {/* Search */}
-      <div className="relative ml-auto hidden w-full max-w-xs items-center sm:flex">
-        <Search className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" />
-        <input
-          placeholder="Search bugs, projects…"
-          className="h-9 w-full rounded-lg border border-input bg-background pl-8 pr-14 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:border-ring focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30"
-        />
-      </div>
-
       {/* Quick create */}
-      <div ref={createRef} className="relative ml-auto sm:ml-0">
+      <div ref={createRef} className="ml-auto">
         <button
           onClick={() => setCreateOpen((v) => !v)}
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo px-3 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90"
@@ -105,6 +96,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
               <Bug className="size-4 text-indigo" />
               New Bug
             </button>
+            {currentUser.role === 'Admin' && (
             <button
               onClick={() => {
                 setCreateOpen(false)
@@ -115,6 +107,7 @@ export function Topbar({ onMenu }: { onMenu: () => void }) {
               <FolderPlus className="size-4 text-indigo" />
               New Project
             </button>
+          )}
           </div>
         )}
       </div>

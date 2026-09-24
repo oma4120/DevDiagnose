@@ -1,5 +1,6 @@
 import { Link, useParams } from 'react-router-dom'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   AlertTriangle,
   Bug as BugIcon,
@@ -15,6 +16,7 @@ import {
   Sparkles,
   UserMinus,
   UserPlus,
+  X,
 } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,11 +26,11 @@ import { Chip } from '@/components/badges'
 import { Avatar } from '@/components/ui/avatar'
 import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
+import { Input } from '@/components/ui/field'
 import { cn } from '@/lib/utils'
-import { useRole } from '@/components/role-context'
 import { useToast } from '@/components/ui/toast'
 import { useData, useProject } from '@/lib/data-context'
-import type { Role } from '@/lib/types'
+import type { Member, Role } from '@/lib/types'
 
 const roleBadge: Record<Role, string> = {
   Admin: 'border-amber-200 bg-amber-50 text-amber-700',
@@ -39,10 +41,12 @@ const roleBadge: Record<Role, string> = {
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>()
   const project = useProject(params.id)
-  const { role } = useRole()
   const { toast } = useToast()
-  const { bugs, members, setBugStatus, currentUser } = useData()
+  const { bugs, members, currentUser, addProjectMember } = useData()
   const [tab, setTab] = useState('overview')
+  const [addOpen, setAddOpen] = useState(false)
+  const [addQuery, setAddQuery] = useState('')
+  const [adding, setAdding] = useState(false)
 
   const projectBugs = project ? bugs.filter((b) => b.projectId === project.id) : []
   const projectMembers = (project?.memberIds ?? [])
@@ -69,7 +73,7 @@ export default function ProjectOverviewPage() {
     )
   }
 
-  const isMember = role === 'Admin' || role === 'QA' || (project.memberIds ?? []).includes(currentUser.id)
+  const isMember = currentUser.role === 'Admin' || (project.memberIds ?? []).includes(currentUser.id)
   if (!isMember) {
     return (
       <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
@@ -97,13 +101,35 @@ export default function ProjectOverviewPage() {
     </span>
   )
 
+  const availableEmployees = members.filter(
+    (m) => !(project.memberIds ?? []).includes(m.id) && m.status !== 'Invited',
+  )
+  const query = addQuery.trim().toLowerCase()
+  const filteredEmployees = query
+    ? availableEmployees.filter((m) => m.name.toLowerCase().includes(query) || m.email.toLowerCase().includes(query))
+    : availableEmployees
+
+  const addEmployee = async (m: Member) => {
+    setAdding(true)
+    try {
+      await addProjectMember(project.id, m.id)
+      setAddOpen(false)
+      setAddQuery('')
+      toast({ kind: 'success', title: 'Member added', description: `${m.name} now has access to ${project.name}.` })
+    } catch (err) {
+      toast({ kind: 'error', title: 'Could not add member', description: err instanceof Error ? err.message : 'Unknown error' })
+    } finally {
+      setAdding(false)
+    }
+  }
+
   return (
     <div className="mx-auto max-w-6xl space-y-6 p-4 sm:p-6">
       <PageHeader
         title={project.name}
         description={project.description}
         actions={
-          role === 'Admin' && (
+          currentUser.role === 'Admin' && (
             <button
               onClick={() => toast({ kind: 'info', title: 'Edit project', description: 'Open the project configuration wizard.' })}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
@@ -170,20 +196,85 @@ export default function ProjectOverviewPage() {
             {projectBugs.length === 0 ? (
               <EmptyState icon={BugIcon} title="No bugs reported for this project." className="border-0 py-8" />
             ) : (
-              <BugBoard bugs={projectBugs} members={members} onStatusChange={(id, status) => { void setBugStatus(id, status) }} />
+              <BugBoard bugs={projectBugs} members={members} />
             )}
           </CardContent>
         </Card>
       )}
 
       {tab === 'team' && (
-        <Card className="overflow-hidden">
-          <CardHeader>
-            <CardTitle>Project team</CardTitle>
-            {role === 'Admin' && (
-              <button onClick={() => toast({ kind: 'success', title: 'Member added' })} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo px-2.5 text-xs font-medium text-white hover:bg-indigo/90"><UserPlus className="size-3.5" />Add member</button>
+        <>
+          {addOpen &&
+            createPortal(
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAddOpen(false)}>
+                <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between !py-4">
+                      <CardTitle>Add team member</CardTitle>
+                      <button onClick={() => setAddOpen(false)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close">
+                        <X className="size-4" />
+                      </button>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="mb-3 text-sm text-muted-foreground">
+                        Add a registered employee by name. They&apos;ll get access to this project.
+                      </p>
+                      <Input
+                        autoFocus
+                        placeholder="Search by name or email…"
+                        value={addQuery}
+                        onChange={(e) => setAddQuery(e.target.value)}
+                        className="mb-3"
+                      />
+                      <div className="max-h-64 space-y-1 overflow-y-auto">
+                        {filteredEmployees.length === 0 ? (
+                          <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+                            {availableEmployees.length === 0
+                              ? 'Every registered employee is already on this team.'
+                              : 'No employee matches that name.'}
+                          </p>
+                        ) : (
+                          filteredEmployees.map((m) => (
+                            <button
+                              key={m.id}
+                              onClick={() => void addEmployee(m)}
+                              disabled={adding}
+                              className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted disabled:opacity-60"
+                            >
+                              <Avatar name={m.name} color={m.avatarColor} size="sm" />
+                              <span className="min-w-0 flex-1">
+                                <span className="block truncate text-sm font-medium text-foreground">{m.name}</span>
+                                <span className="block truncate text-xs text-muted-foreground">{m.email}</span>
+                              </span>
+                              <span className={cn('inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium', roleBadge[m.role])}>
+                                {m.role}
+                              </span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              </div>,
+              document.body,
             )}
-          </CardHeader>
+
+          <Card className="overflow-hidden">
+            <CardHeader>
+              <CardTitle>Project team</CardTitle>
+              {currentUser.role === 'Admin' && (
+                <button
+                  onClick={() => {
+                    setAddQuery('')
+                    setAddOpen(true)
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo px-2.5 text-xs font-medium text-white hover:bg-indigo/90"
+                >
+                  <UserPlus className="size-3.5" />Add member
+                </button>
+              )}
+            </CardHeader>
           <div className="overflow-x-auto scroll-thin">
             <table className="w-full text-sm">
               <thead>
@@ -193,7 +284,7 @@ export default function ProjectOverviewPage() {
                   <th className="px-4 py-2.5 font-medium">Status</th>
                   <th className="px-4 py-2.5 text-right font-medium">Assigned</th>
                   <th className="px-4 py-2.5 text-right font-medium">Resolved</th>
-                  {role === 'Admin' && <th className="px-4 py-2.5" />}
+                  {currentUser.role === 'Admin' && <th className="px-4 py-2.5" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
@@ -209,7 +300,7 @@ export default function ProjectOverviewPage() {
                     <td className="px-4 py-3 text-muted-foreground">{m.status}</td>
                     <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.assignedBugs}</td>
                     <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.resolvedBugs}</td>
-                    {role === 'Admin' && (
+                    {currentUser.role === 'Admin' && (
                       <td className="px-4 py-3 text-right">
                         <button onClick={() => toast({ kind: 'info', title: 'Remove member?', description: `${m.name} would lose project access.` })} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-error" aria-label={`Remove ${m.name}`}><UserMinus className="size-4" /></button>
                       </td>
@@ -220,6 +311,7 @@ export default function ProjectOverviewPage() {
             </table>
           </div>
         </Card>
+        </>
       )}
 
       {tab === 'context' && (

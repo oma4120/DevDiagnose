@@ -2,6 +2,7 @@ import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   Bell,
   Bug,
+  Building2,
   FolderKanban,
   LayoutDashboard,
   ListChecks,
@@ -11,7 +12,6 @@ import {
   X,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { useRole } from '@/components/role-context'
 import { useData } from '@/lib/data-context'
 import { Avatar } from '@/components/ui/avatar'
 import DevDiagnoseLogo from '@/components/brand/DevDiagnoseLogo'
@@ -22,19 +22,17 @@ const nav: { label: string; href: string; icon: typeof Bug; roles: Role[] }[] = 
   { label: 'Projects', href: '/projects', icon: FolderKanban, roles: ['Admin', 'QA', 'Developer'] },
   { label: 'Bugs', href: '/bugs', icon: Bug, roles: ['Admin', 'QA', 'Developer'] },
   { label: 'My Work', href: '/my-work', icon: ListChecks, roles: ['QA', 'Developer'] },
-  { label: 'Team', href: '/team', icon: Users, roles: ['Admin'] },
+  { label: 'Employees', href: '/employees', icon: Users, roles: ['Admin'] },
+  { label: 'Company', href: '/company', icon: Building2, roles: ['Admin'] },
   { label: 'Notifications', href: '/notifications', icon: Bell, roles: ['Admin', 'QA', 'Developer'] },
   { label: 'Settings', href: '/settings', icon: Settings, roles: ['Admin', 'QA', 'Developer'] },
 ]
 
-const roles: Role[] = ['Admin', 'QA', 'Developer']
-
 export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { pathname } = useLocation()
   const navigate = useNavigate()
-  const { role, setRole } = useRole()
   const { company, currentUser, logout } = useData()
-  const items = nav.filter((item) => item.roles.includes(role))
+  const items = nav.filter((item) => item.roles.includes(currentUser.role))
 
   return (
     <>
@@ -102,36 +100,13 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
           })}
         </nav>
 
-        {/* Role switcher (demo) */}
-        <div className="border-t border-sidebar-border px-3 py-2">
-          <p className="px-1 pb-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-            Preview as role
-          </p>
-          <div className="flex gap-1">
-            {roles.map((r) => (
-              <button
-                key={r}
-                onClick={() => setRole(r)}
-                className={cn(
-                  'flex-1 rounded-md px-1 py-1 text-[11px] font-medium transition-colors',
-                  role === r
-                    ? 'bg-sidebar-accent text-white ring-1 ring-indigo'
-                    : 'text-slate-400 hover:bg-sidebar-accent hover:text-white',
-                )}
-              >
-                {r}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* User */}
         <div className="flex items-center gap-1 border-t border-sidebar-border p-3">
           <div className="flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 py-1">
             <Avatar name={currentUser.name} color={currentUser.avatarColor} size="sm" />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-white">{currentUser.name}</span>
-              <span className="block truncate text-[11px] text-slate-400">{role}</span>
+              <span className="block truncate text-[10px] text-sidebar-foreground/70">{currentUser.role}</span>
             </span>
           </div>
           <button
