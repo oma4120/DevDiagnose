@@ -12,6 +12,7 @@ import type {
   AIAnalysis,
   Bug,
   BugStatus,
+  Company,
   InviteResult,
   Member,
   NotificationItem,
@@ -24,9 +25,10 @@ export interface DataContextValue {
   bootstrapError: string | null
   isAuthenticated: boolean
   currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
-  company: { name: string; workspace: string; hasQA: boolean }
+  company: Company
   hasQA: boolean
   setHasQA: (value: boolean) => void
+  updateCompany: (payload: { name?: string; workspace?: string; hasQA?: boolean; logo?: string | null }) => Promise<Company>
   members: Member[]
   projects: Project[]
   bugs: Bug[]
@@ -40,7 +42,9 @@ export interface DataContextValue {
   addProjectMember: (projectId: string, memberId: string) => Promise<Project>
   createBug: (payload: Partial<Bug>) => Promise<Bug>
   createProject: (payload: Partial<Project>) => Promise<Project>
+  updateProject: (id: string, payload: Partial<Project>) => Promise<Project>
   addComment: (id: string, body: string, authorName?: string) => Promise<Bug>
+  updateBug: (id: string, fields: Partial<Bug>) => Promise<Bug>
   setBugStatus: (id: string, status: BugStatus) => Promise<Bug>
   assignBug: (id: string, assigneeIds: string[]) => Promise<Bug>
   analyzeBug: (id: string) => Promise<AIAnalysis>
@@ -52,7 +56,7 @@ const DataContext = createContext<DataContextValue | null>(null)
 export function DataProvider({ children }: { children: ReactNode }) {
   const [authToken, setAuthToken] = useState<string | null>(() => getToken())
   const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
-  const [company, setCompany] = useState({ name: '', workspace: '', hasQA: true })
+  const [company, setCompany] = useState<Company>({ name: '', workspace: '', hasQA: true, logo: null })
   const [hasQA, setHasQA] = useState(true)
   const [members, setMembers] = useState<Member[]>([])
   const [projects, setProjects] = useState<Project[]>([])
@@ -71,6 +75,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const data = await api.bootstrap()
       setCurrentUser(data.currentUser)
       setCompany(data.company)
+      setHasQA(data.company.hasQA !== false)
       setMembers(data.members)
       setProjects(data.projects)
       setBugs(data.bugs)
@@ -125,6 +130,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return updated
   }, [])
 
+  const updateCompany = useCallback(
+    async (payload: { name?: string; workspace?: string; hasQA?: boolean; logo?: string | null }) => {
+      const updated = await api.company.update(payload)
+      setCompany(updated)
+      if (payload.hasQA !== undefined) setHasQA(payload.hasQA)
+      return updated
+    },
+    [],
+  )
+
   const createBug = useCallback(
     async (payload: Partial<Bug>) => {
       const bug = await api.bugs.create(payload)
@@ -144,6 +159,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return project
   }, [])
 
+  const updateProject = useCallback(async (id: string, payload: Partial<Project>) => {
+    const project = await api.projects.update(id, payload)
+    setProjects((prev) => prev.map((p) => (p.id === id ? project : p)))
+    return project
+  }, [])
+
   const addComment = useCallback(
     async (id: string, body: string, authorName = currentUser.name) => {
       const bug = await api.bugs.addComment(id, { authorKind: 'Developer', authorName, body })
@@ -155,6 +176,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const setBugStatus = useCallback(async (id: string, status: BugStatus) => {
     const bug = await api.bugs.setStatus(id, status)
+    setBugs((prev) => prev.map((b) => (b.id === id ? bug : b)))
+    return bug
+  }, [])
+
+  const updateBug = useCallback(async (id: string, fields: Partial<Bug>) => {
+    const bug = await api.bugs.patch(id, fields)
     setBugs((prev) => prev.map((b) => (b.id === id ? bug : b)))
     return bug
   }, [])
@@ -196,6 +223,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         company,
         hasQA,
         setHasQA,
+        updateCompany,
         members,
         projects,
         bugs,
@@ -209,7 +237,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         addProjectMember,
         createBug,
         createProject,
+        updateProject,
         addComment,
+        updateBug,
         setBugStatus,
         assignBug,
         analyzeBug,
@@ -254,7 +284,7 @@ export function useVisibleProjects(role: string): Project[] {
   return projects.filter((p) => p.memberIds.includes(currentUser.id))
 }
 
-/** Bugs the current role may see — all colleagues' bugs within visible projects. */
+/** Bugs the current role may see - all colleagues' bugs within visible projects. */
 export function useVisibleBugs(role: string): Bug[] {
   const { bugs } = useData()
   const visibleIds = new Set(useVisibleProjects(role).map((p) => p.id))
@@ -263,18 +293,31 @@ export function useVisibleBugs(role: string): Bug[] {
 }
 
 export function useBug(id: string | undefined) {
-  const { bugs } = useData()
-  return id ? bugs.find((b) => b.id === id) : undefined
+  const { currentUser, bugs } = useData()
+  const visible = useVisibleBugs(currentUser.role)
+  if (!id) return undefined
+  // The bug list is scoped to the caller's projects, so an id outside that set
+  // resolves to nothing (same rule as the bugs page).
+  return visible.some((b) => b.id === id) ? bugs.find((b) => b.id === id) : undefined
+}
+
+/** Roll a project's bugs up into the counters shown on its cards. */
+export function projectBugStats(projectBugs: Bug[]) {
+  const isOpen = (b: Bug) => !['Resolved', 'Closed'].includes(b.status)
+  return {
+    openBugs: projectBugs.filter(isOpen).length,
+    highSeverity: projectBugs.filter((b) => isOpen(b) && ['Critical', 'High'].includes(b.severity))
+      .length,
+    resolvedBugs: projectBugs.filter((b) => !isOpen(b)).length,
+    awaitingValidation: projectBugs.filter((b) => b.status === 'QA Validation').length,
+  }
 }
 
 export function useProjectsBugStats(projectId: string) {
-  const { bugs } = useData()
-  const projectBugs = bugs.filter((b) => b.projectId === projectId)
+  const { currentUser } = useData()
+  const projectBugs = useVisibleBugs(currentUser.role).filter((b) => b.projectId === projectId)
   return {
     projectBugs,
-    openBugs: projectBugs.filter((b) => !['Resolved', 'Closed'].includes(b.status)).length,
-    highSeverity: projectBugs.filter((b) => ['Critical', 'High'].includes(b.severity)).length,
-    resolvedBugs: projectBugs.filter((b) => ['Resolved', 'Closed'].includes(b.status)).length,
-    awaitingValidation: projectBugs.filter((b) => b.status === 'QA Validation').length,
+    ...projectBugStats(projectBugs),
   }
 }

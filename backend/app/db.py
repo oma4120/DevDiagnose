@@ -103,7 +103,17 @@ class Store:
         return deepcopy(self._current_user)
 
     def company(self) -> dict:
+        doc = self.backend.find_one("company", "company")
+        if doc:
+            return deepcopy(doc)
         return deepcopy(self._company)
+
+    def save_company(self, updates: dict) -> dict:
+        doc = self.backend.find_one("company", "company") or {"id": "company"}
+        doc.update(updates)
+        self.backend.replace("company", doc)
+        self._company = deepcopy(doc)
+        return deepcopy(doc)
 
     def seed_if_empty(self) -> None:
         if self.seeded:
@@ -112,6 +122,8 @@ class Store:
             if self.backend.count(coll) == 0 and coll in self._seed_payload:
                 for doc in self._seed_payload[coll]:
                     self.backend.insert(coll, doc)
+        if self.backend.count("company") == 0:
+            self.backend.insert("company", {"id": "company", **self._seed_payload["company"]})
         self.seeded = True
         self.migrate()
 

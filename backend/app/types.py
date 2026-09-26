@@ -58,6 +58,9 @@ class Category(StrEnum):
     regression = "Regression"
     database = "Database"
     network = "Network"
+    api = "API"
+    authentication = "Authentication"
+    other = "Other"
 
 
 class EvidenceType(StrEnum):
@@ -69,6 +72,7 @@ class EvidenceType(StrEnum):
     log = "Server Log"
     video = "Screen Recording"
     screenshot = "Screenshot"
+    other = "Other"
 
 
 class Member(Base):
@@ -82,7 +86,7 @@ class Member(Base):
     status: str
     assignedBugs: int = 0
     resolvedBugs: int = 0
-    lastActive: str = "—"
+    lastActive: str = "-"
     # Stored in the DB but never serialized over the API.
     passwordHash: str | None = Field(default=None, exclude=True)
     inviteTokenHash: str | None = Field(default=None, exclude=True)
@@ -174,7 +178,7 @@ class Comment(Base):
 
 class TimelineEntry(Base):
     id: str
-    kind: Literal["created", "assigned", "ai", "comment", "status", "resolved"]
+    kind: Literal["created", "assigned", "ai", "comment", "status", "resolved", "closed", "validated", "edited"]
     label: str
     actor: str
     at: str
@@ -203,6 +207,9 @@ class AIAnalysis(Base):
     confidence: int
     uncertainty: str | None = None
     evidenceConsidered: list[str] = Field(default_factory=list)
+    # reportRevision of the bug when this analysis ran: a later bug revision
+    # means the report changed and the analysis is stale.
+    reportRevision: int = 0
     # Snapshot of the project/bug context + evidence the model actually saw.
     inputContext: dict = Field(default_factory=dict)
 
@@ -235,6 +242,9 @@ class Bug(Base):
     resolvedBy: str | None = None
     resolvedAt: str | None = None
     closedAt: str | None = None
+    # Bumped every time the report content changes (see patch_bug), so the
+    # frontend can flag analyses that ran before the latest edit.
+    reportRevision: int = 0
 
 
 class Notification(Base):

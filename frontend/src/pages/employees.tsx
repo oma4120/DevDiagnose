@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Check, Copy, Mail, MoreHorizontal, UserPlus, X } from 'lucide-react'
+import { Check, Copy, Mail, Trash2, UserPlus, X } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input, Label, Select } from '@/components/ui/field'
@@ -8,6 +8,7 @@ import { Avatar } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { useData } from '@/lib/data-context'
 import { useToast } from '@/components/ui/toast'
+import { checkEmail, errorMessage } from '@/lib/validation'
 import type { InviteResult, Role } from '@/lib/types'
 
 const roleBadge: Record<Role, string> = {
@@ -54,6 +55,11 @@ export default function EmployeesPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    const emailError = checkEmail(email)
+    if (emailError) {
+      setError(emailError)
+      return
+    }
     setBusy(true)
     try {
       const result = await inviteMemberByEmail(email.trim(), empRole, firstName.trim(), lastName.trim())
@@ -69,7 +75,7 @@ export default function EmployeesPage() {
           : 'Invitation created. Add SMTP settings to actually email the link.',
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Could not invite the employee')
+      setError(errorMessage(err, 'Could not invite the employee'))
     } finally {
       setBusy(false)
     }
@@ -206,7 +212,7 @@ export default function EmployeesPage() {
                 <th className="px-4 py-2.5 text-right font-medium">Assigned</th>
                 <th className="px-4 py-2.5 text-right font-medium">Resolved</th>
                 <th className="px-4 py-2.5 font-medium">Last active</th>
-                <th className="px-4 py-2.5" />
+                <th className="px-4 py-2.5"><span className="sr-only">Remove</span></th>
               </tr>
             </thead>
             <tbody className="divide-y divide-border">
@@ -238,7 +244,7 @@ export default function EmployeesPage() {
                     <button
                       onClick={async () => {
                         if (!isAdmin) {
-                          toast({ kind: 'info', title: 'Member actions', description: 'Only admins can manage members.' })
+                          toast({ kind: 'info', title: 'Remove member', description: 'Only admins can remove members.' })
                           return
                         }
                         if (m.protected) {
@@ -253,10 +259,10 @@ export default function EmployeesPage() {
                           toast({ kind: 'error', title: 'Could not remove member', description: err instanceof Error ? err.message : 'Unknown error' })
                         }
                       }}
-                      className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      aria-label={`Actions for ${m.name || m.email}`}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-error"
+                      aria-label={`Remove ${m.name || m.email}`}
                     >
-                      <MoreHorizontal className="size-4" />
+                      <Trash2 className="size-4" />
                     </button>
                   </td>
                 </tr>

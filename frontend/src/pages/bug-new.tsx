@@ -1,9 +1,10 @@
 import { useNavigate } from 'react-router-dom'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import {
   Bug as BugIcon,
   Code2,
   FileText,
+  Image as ImageIcon,
   Info,
   ListChecks,
   Paperclip,
@@ -13,11 +14,12 @@ import {
 } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input, Label, Select, Textarea, FieldHint, MonoTextarea } from '@/components/ui/field'
+import { Input, Label, Select, Textarea, FieldHint, FieldError, MonoTextarea } from '@/components/ui/field'
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { useData, useVisibleProjects } from '@/lib/data-context'
+import { checkLength, errorMessage, RULES } from '@/lib/validation'
 import type { Category, EvidenceType, Priority, Severity } from '@/lib/types'
 
 const evidenceTypes: EvidenceType[] = [
@@ -27,6 +29,7 @@ const evidenceTypes: EvidenceType[] = [
   'Server Log',
   'Stack Trace',
   'Relevant Code',
+  'Network Request',
   'Other',
 ]
 const severities: Severity[] = ['Critical', 'High', 'Medium', 'Low']
@@ -40,6 +43,8 @@ const categories: Category[] = [
   'Security',
   'Performance',
   'UI/UX',
+  'Regression',
+  'Network',
   'Other',
 ]
 
@@ -48,9 +53,48 @@ interface EvidenceDraft {
   type: EvidenceType
   title: string
   content: string
+  fileUrl?: string
 }
 
 const codeLikeTypes: EvidenceType[] = ['Console Error', 'API Response', 'Server Log', 'Stack Trace', 'Relevant Code']
+
+/** Reads an image file and downscales it to a JPEG data URL (display-only storage). */
+function readImageFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Only image files are supported'))
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      reject(new Error('Image must be smaller than 8 MB'))
+      return
+    }
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      const scale = Math.min(1, 1400 / Math.max(img.width, img.height))
+      const w = Math.max(1, Math.round(img.width * scale))
+      const h = Math.max(1, Math.round(img.height * scale))
+      const canvas = document.createElement('canvas')
+      canvas.width = w
+      canvas.height = h
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        URL.revokeObjectURL(url)
+        reject(new Error('Canvas unavailable'))
+        return
+      }
+      ctx.drawImage(img, 0, 0, w, h)
+      URL.revokeObjectURL(url)
+      resolve(canvas.toDataURL('image/jpeg', 0.85))
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not read that image'))
+    }
+    img.src = url
+  })
+}
 
 export default function NewBugPage() {
   const navigate = useNavigate()
@@ -72,34 +116,71 @@ export default function NewBugPage() {
     browserDevice: '',
   })
   const [evidence, setEvidence] = useState<EvidenceDraft[]>([])
-  const [draft, setDraft] = useState<{ type: EvidenceType; title: string; content: string }>({
+  const [draft, setDraft] = useState<{ type: EvidenceType; title: string; content: string; fileUrl?: string }>({
     type: 'Console Error',
     title: '',
     content: '',
   })
+  const imageRef = useRef<HTMLInputElement>(null)
   const [analyzeOnSubmit, setAnalyzeOnSubmit] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [touched, setTouched] = useState(false)
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((f) => ({ ...f, [key]: value }))
 
+  const isScreenshot = draft.type === 'Screenshot'
+
+  const pickScreenshot = async (file: File | undefined) => {
+    if (!file) return
+    try {
+      const dataUrl = await readImageFile(file)
+      setDraft((d) => ({ ...d, fileUrl: dataUrl }))
+    } catch (err) {
+      toast({ kind: 'error', title: 'Could not attach image', description: err instanceof Error ? err.message : undefined })
+    }
+  }
+
   const addEvidence = () => {
+    if (isScreenshot) {
+      if (!draft.fileUrl) {
+        toast({ kind: 'warning', title: 'No image selected', description: 'Choose a screenshot image before attaching.' })
+        return
+      }
+      setEvidence((e) => [...e, { id: Date.now(), ...draft, title: draft.title.trim() || draft.type }])
+      setDraft({ type: draft.type, title: '', content: '', fileUrl: undefined })
+      toast({ kind: 'success', title: 'Screenshot attached', description: 'Shown for display only - the AI will not analyze it.' })
+      return
+    }
     if (!draft.content.trim()) {
       toast({ kind: 'warning', title: 'Nothing to attach', description: 'Add some content before attaching evidence.' })
       return
     }
     setEvidence((e) => [...e, { id: Date.now(), ...draft, title: draft.title.trim() || draft.type }])
-    setDraft({ type: draft.type, title: '', content: '' })
+    setDraft({ type: draft.type, title: '', content: '', fileUrl: undefined })
     toast({ kind: 'success', title: 'Evidence attached', description: 'The AI will consider it during analysis.' })
   }
 
   const removeEvidence = (id: number) => setEvidence((e) => e.filter((x) => x.id !== id))
 
-  const canSubmit = form.title.trim() && form.description.trim() && form.projectId
+  const titleError = checkLength(form.title, RULES.bugTitle.min, 'Title', RULES.bugTitle.max)
+  const descriptionError = checkLength(
+    form.description,
+    RULES.bugDescription.min,
+    'Description',
+    RULES.bugDescription.max,
+  )
+  const projectError = form.projectId ? null : 'Choose a project before submitting.'
+  const canSubmit = !titleError && !descriptionError && !projectError
 
   const submit = async () => {
     if (!canSubmit) {
-      toast({ kind: 'error', title: 'Missing required fields', description: 'A title, description, and project are required.' })
+      setTouched(true)
+      toast({
+        kind: 'error',
+        title: 'Check the highlighted fields',
+        description: titleError ?? descriptionError ?? projectError ?? undefined,
+      })
       return
     }
     setSubmitting(true)
@@ -121,6 +202,7 @@ export default function NewBugPage() {
           type: e.type,
           title: e.title,
           content: e.content,
+          fileUrl: e.fileUrl,
           addedBy: currentUser.id,
           addedAt: 'just now',
         })),
@@ -139,8 +221,8 @@ export default function NewBugPage() {
           /* analysis also available via the Run AI Analysis button on the bug page */
         })
       }
-    } catch {
-      toast({ kind: 'error', title: 'Could not submit bug', description: 'Please try again.' })
+    } catch (err) {
+      toast({ kind: 'error', title: 'Could not submit bug', description: errorMessage(err) })
       setSubmitting(false)
     }
   }
@@ -156,7 +238,7 @@ export default function NewBugPage() {
 
       <div className="flex items-start gap-2 rounded-lg border border-indigo/20 bg-accent/50 p-3 text-xs text-accent-foreground">
         <Sparkles className="mt-0.5 size-3.5 shrink-0" />
-        The more precise your reproduction steps and evidence, the more accurate the AI diagnosis. Everything you enter is analyzed alongside the project&apos;s tech stack and business rules.
+        The more precise your reproduction steps and evidence, the more accurate the AI diagnosis. Everything you enter is analyzed alongside the project&apos;s tech stack and business rules - except screenshots, which are display only.
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
@@ -169,20 +251,41 @@ export default function NewBugPage() {
                 <Label htmlFor="project">Project</Label>
                 <Select id="project" value={form.projectId} onChange={(e) => set('projectId', e.target.value)}>
                   {visibleProjects.length === 0 ? (
-                    <option value="" disabled>No accessible projects — ask an admin to add you to a team</option>
+                    <option value="" disabled>No accessible projects - ask an admin to add you to a team</option>
                   ) : (
                     visibleProjects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)
                   )}
                 </Select>
                 <FieldHint>Determines which context the AI uses to diagnose this bug.</FieldHint>
+                <FieldError>{touched ? projectError : null}</FieldError>
               </div>
               <div>
                 <Label htmlFor="title">Title</Label>
-                <Input id="title" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Checkout returns HTTP 500 when cart is empty" />
+                <Input
+                  id="title"
+                  value={form.title}
+                  onChange={(e) => set('title', e.target.value)}
+                  onBlur={() => setTouched(true)}
+                  placeholder="e.g. Checkout returns HTTP 500 when cart is empty"
+                  aria-invalid={Boolean(touched && titleError)}
+                />
+                <FieldHint>At least {RULES.bugTitle.min} characters. One clear sentence works best.</FieldHint>
+                <FieldError>{touched ? titleError : null}</FieldError>
               </div>
               <div>
                 <Label htmlFor="description">Description</Label>
-                <Textarea id="description" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="What is happening, where, and why it matters." />
+                <Textarea
+                  id="description"
+                  value={form.description}
+                  onChange={(e) => set('description', e.target.value)}
+                  onBlur={() => setTouched(true)}
+                  placeholder="What is happening, where, and why it matters."
+                  aria-invalid={Boolean(touched && descriptionError)}
+                />
+                <FieldHint>
+                  At least {RULES.bugDescription.min} characters - the AI skips analysis of placeholder text.
+                </FieldHint>
+                <FieldError>{touched ? descriptionError : null}</FieldError>
               </div>
             </CardContent>
           </Card>
@@ -228,15 +331,21 @@ export default function NewBugPage() {
                 <ul className="space-y-2">
                   {evidence.map((e) => (
                     <li key={e.id} className="flex items-start gap-3 rounded-lg border border-border p-3">
-                      <span className={cn('mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md', codeLikeTypes.includes(e.type) ? 'bg-navy text-slate-100' : 'bg-accent text-accent-foreground')}>
-                        {codeLikeTypes.includes(e.type) ? <Code2 className="size-4" /> : <Paperclip className="size-4" />}
-                      </span>
+                      {e.fileUrl ? (
+                        <img src={e.fileUrl} alt="" className="mt-0.5 size-10 shrink-0 rounded-md border border-border object-cover" />
+                      ) : (
+                        <span className={cn('mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-md', codeLikeTypes.includes(e.type) ? 'bg-navy text-slate-100' : 'bg-accent text-accent-foreground')}>
+                          {codeLikeTypes.includes(e.type) ? <Code2 className="size-4" /> : <Paperclip className="size-4" />}
+                        </span>
+                      )}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <span className="truncate text-sm font-medium text-foreground">{e.title}</span>
                           <span className="rounded-md bg-soft px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{e.type}</span>
                         </div>
-                        <p className="mt-0.5 line-clamp-1 font-mono text-xs text-muted-foreground">{e.content}</p>
+                        <p className="mt-0.5 line-clamp-1 font-mono text-xs text-muted-foreground">
+                          {e.fileUrl ? 'Display only - not analyzed by the AI' : e.content}
+                        </p>
                       </div>
                       <button onClick={() => removeEvidence(e.id)} className="rounded-md p-1 text-muted-foreground hover:text-error" aria-label="Remove evidence"><Trash2 className="size-4" /></button>
                     </li>
@@ -248,7 +357,10 @@ export default function NewBugPage() {
                 <div className="grid gap-3 sm:grid-cols-[160px_1fr]">
                   <div>
                     <Label>Type</Label>
-                    <Select value={draft.type} onChange={(e) => setDraft({ ...draft, type: e.target.value as EvidenceType })}>
+                    <Select
+                      value={draft.type}
+                      onChange={(e) => setDraft({ type: e.target.value as EvidenceType, title: draft.title, content: draft.content, fileUrl: undefined })}
+                    >
                       {evidenceTypes.map((t) => <option key={t}>{t}</option>)}
                     </Select>
                   </div>
@@ -258,8 +370,45 @@ export default function NewBugPage() {
                   </div>
                 </div>
                 <div className="mt-3">
-                  <Label>Content</Label>
-                  {isCodeLike ? (
+                  <Label>{isScreenshot ? 'Image' : 'Content'}</Label>
+                  {isScreenshot ? (
+                    <div className="space-y-2">
+                      {draft.fileUrl ? (
+                        <div className="flex items-start gap-3">
+                          <img src={draft.fileUrl} alt="Screenshot preview" className="max-h-44 rounded-lg border border-border object-contain" />
+                          <div className="space-y-1">
+                            <button type="button" onClick={() => imageRef.current?.click()} className="block text-xs font-medium text-indigo hover:underline">
+                              Replace image
+                            </button>
+                            <button type="button" onClick={() => setDraft((d) => ({ ...d, fileUrl: undefined }))} className="block text-xs font-medium text-error hover:underline">
+                              Remove image
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => imageRef.current?.click()}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-border px-3 py-6 text-sm text-muted-foreground hover:border-indigo/40 hover:text-indigo"
+                        >
+                          <ImageIcon className="size-4" />Choose image…
+                        </button>
+                      )}
+                      <input
+                        ref={imageRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          void pickScreenshot(e.target.files?.[0])
+                          e.target.value = ''
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        PNG or JPG, auto-resized. Display only - not sent to the AI analysis.
+                      </p>
+                    </div>
+                  ) : isCodeLike ? (
                     <MonoTextarea value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} placeholder="Paste the log, trace, response, or code snippet…" />
                   ) : (
                     <Textarea value={draft.content} onChange={(e) => setDraft({ ...draft, content: e.target.value })} placeholder="Describe or paste the evidence…" />
@@ -318,7 +467,7 @@ export default function NewBugPage() {
               </label>
               <button
                 onClick={submit}
-                disabled={!canSubmit || submitting}
+                disabled={submitting}
                 className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-lg bg-indigo px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {analyzeOnSubmit ? <Sparkles className="size-4" /> : <BugIcon className="size-4" />}

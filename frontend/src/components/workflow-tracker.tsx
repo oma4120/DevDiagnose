@@ -19,14 +19,18 @@ export function WorkflowTracker({
   hasQA = true,
   fixer,
   validator,
+  validationLabel,
 }: {
   status: BugStatus
   hasQA?: boolean
   fixer?: string
   validator?: string
+  validationLabel?: string
 }) {
   const flow = hasQA ? fullFlow : noQAFlow
-  const currentIndex = Math.max(0, flow.indexOf(status))
+  const stepIndex = flow.indexOf(status)
+  // A status outside the flow (e.g. Closed with no QA) means everything is done.
+  const currentIndex = stepIndex === -1 ? flow.length : stepIndex
 
   return (
     <div className="space-y-3">
@@ -55,7 +59,7 @@ export function WorkflowTracker({
                 >
                   {done ? <Check className="size-2.5" /> : i + 1}
                 </span>
-                {step}
+                {step === 'QA Validation' && validationLabel ? validationLabel : step}
               </div>
               {i < flow.length - 1 && (
                 <span className={cn('h-px w-4 shrink-0', done ? 'bg-emerald-300' : 'bg-border')} aria-hidden />

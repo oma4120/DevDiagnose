@@ -1,28 +1,52 @@
+import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { MessageSquare, Paperclip, Sparkles } from 'lucide-react'
+import { MessageSquare, Paperclip, Sparkles, TriangleAlert } from 'lucide-react'
 import { AvatarGroup } from '@/components/ui/avatar'
-import { CategoryBadge, PriorityBadge, SeverityBadge } from '@/components/badges'
-import { cn } from '@/lib/utils'
+import { CategoryBadge, PriorityBadge, SeverityBadge, StatusBadge } from '@/components/badges'
+import { byClosedDesc, cn } from '@/lib/utils'
 import type { Bug, Member } from '@/lib/types'
 
-export const BOARD_COLUMNS = [
-  { id: 'pending', label: 'Pending', statuses: ['Draft', 'Submitted', 'Assigned'] as Bug['status'][], dot: 'bg-violet-500' },
-  { id: 'in-progress', label: 'In Progress', statuses: ['In Progress'] as Bug['status'][], dot: 'bg-blue-500' },
-  { id: 'review', label: 'Review', statuses: ['QA Validation'] as Bug['status'][], dot: 'bg-amber-500' },
-  { id: 'done', label: 'Done', statuses: ['Resolved', 'Closed'] as Bug['status'][], dot: 'bg-emerald-500' },
-]
+const DONE_LIMIT = 3
+
+export function boardColumns(hasQA: boolean) {
+  return [
+    { id: 'pending', label: 'Pending', statuses: ['Draft', 'Submitted', 'Assigned'] as Bug['status'][], dot: 'bg-violet-500' },
+    { id: 'in-progress', label: 'In Progress', statuses: ['In Progress'] as Bug['status'][], dot: 'bg-blue-500' },
+    {
+      id: 'review',
+      label: 'Review',
+      statuses: (hasQA ? ['Resolved', 'QA Validation'] : ['QA Validation']) as Bug['status'][],
+      dot: 'bg-amber-500',
+    },
+    {
+      id: 'done',
+      label: 'Done',
+      statuses: (hasQA ? ['Closed'] : ['Resolved', 'Closed']) as Bug['status'][],
+      dot: 'bg-emerald-500',
+    },
+  ]
+}
 
 export interface BugBoardProps {
   bugs: Bug[]
   members: Member[]
+  hasQA?: boolean
+  /** Show every closed bug in Done (e.g. when the user explicitly filters for them). */
+  expandDone?: boolean
   className?: string
 }
 
-export function BugBoard({ bugs, members, className }: BugBoardProps) {
+export function BugBoard({ bugs, members, hasQA = true, expandDone = false, className }: BugBoardProps) {
+  const columns = boardColumns(hasQA)
+  const [doneExpanded, setDoneExpanded] = useState(false)
   return (
     <div className={cn('grid gap-3 overflow-x-auto pb-1 sm:grid-cols-2 lg:grid-cols-4', className)}>
-      {BOARD_COLUMNS.map((col) => {
-        const items = bugs.filter((b) => col.statuses.includes(b.status))
+      {columns.map((col) => {
+        const matched = bugs.filter((b) => col.statuses.includes(b.status))
+        const items = col.id === 'done' ? [...matched].sort(byClosedDesc) : matched
+        const collapseDone = col.id === 'done' && !expandDone && !doneExpanded
+        const shown = collapseDone ? items.slice(0, DONE_LIMIT) : items
+        const hiddenCount = items.length - shown.length
         return (
           <div key={col.id} className="flex min-w-[240px] flex-col rounded-xl border border-border bg-soft/50">
             <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2.5">
@@ -33,13 +57,29 @@ export function BugBoard({ bugs, members, className }: BugBoardProps) {
               </span>
             </div>
             <div className="space-y-2 p-2">
-              {items.map((b) => (
+              {shown.map((b) => (
                 <BugBoardCard key={b.id} bug={b} members={members} />
               ))}
               {items.length === 0 && (
                 <p className="rounded-lg border border-dashed border-border px-2 py-6 text-center text-xs text-muted-foreground">
                   Nothing here
                 </p>
+              )}
+              {hiddenCount > 0 && (
+                <button
+                  onClick={() => setDoneExpanded(true)}
+                  className="w-full rounded-lg border border-dashed border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-indigo/40 hover:text-indigo"
+                >
+                  Show {hiddenCount} more closed
+                </button>
+              )}
+              {col.id === 'done' && doneExpanded && !expandDone && items.length > DONE_LIMIT && (
+                <button
+                  onClick={() => setDoneExpanded(false)}
+                  className="w-full rounded-lg border border-dashed border-border px-2 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:border-indigo/40 hover:text-indigo"
+                >
+                  Show fewer
+                </button>
               )}
             </div>
           </div>
@@ -71,8 +111,15 @@ function BugBoardCard({ bug, members }: { bug: Bug; members: Member[] }) {
         {bug.title}
       </Link>
       <div className="mt-2 flex flex-wrap items-center gap-1.5">
+        <StatusBadge status={bug.status} />
         <SeverityBadge severity={bug.severity} />
         <PriorityBadge priority={bug.priority} />
+        {bug.needsAttention && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-orange-200 bg-orange-50 px-2 py-0.5 text-xs font-medium text-orange-700">
+            <TriangleAlert className="size-3" />
+            Needs changes
+          </span>
+        )}
       </div>
       <div className="mt-1.5 flex items-center justify-between gap-2">
         <CategoryBadge category={bug.category} />

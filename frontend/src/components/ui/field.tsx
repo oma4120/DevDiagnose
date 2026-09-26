@@ -27,6 +27,11 @@ export function FieldHint({ children }: { children: React.ReactNode }) {
   return <p className="mt-1 text-xs text-muted-foreground">{children}</p>
 }
 
+export function FieldError({ children }: { children: React.ReactNode | null }) {
+  if (!children) return null
+  return <p className="mt-1 text-xs font-medium text-error">{children}</p>
+}
+
 export function MonoTextarea({ className, ...props }: React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
     <textarea

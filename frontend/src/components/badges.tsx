@@ -1,4 +1,6 @@
 import { cn } from '@/lib/utils'
+import { useData } from '@/lib/data-context'
+import { statusLabel } from '@/lib/status-rules'
 import type { BugStatus, Category, Priority, Severity } from '@/lib/types'
 
 const base =
@@ -19,11 +21,12 @@ const statusStyles: Record<BugStatus, { cls: string; dot: string }> = {
 }
 
 export function StatusBadge({ status, className }: { status: BugStatus; className?: string }) {
+  const { hasQA } = useData()
   const s = statusStyles[status]
   return (
     <span className={cn(base, s.cls, className)}>
       <Dot className={s.dot} />
-      {status}
+      {statusLabel(status, hasQA)}
     </span>
   )
 }

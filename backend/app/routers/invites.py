@@ -2,7 +2,7 @@
 
 An invitation is a pending `invites` record (no member exists yet). The
 employee follows the emailed link, sets their name + password, and the member
-is created here — then they are redirected to the login page.
+is created here - then they are redirected to the login page.
 """
 
 from fastapi import APIRouter, HTTPException, status

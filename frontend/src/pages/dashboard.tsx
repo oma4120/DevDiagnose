@@ -16,10 +16,11 @@ import { BarChart, DonutChart } from '@/components/bar-chart'
 import { BugLine } from '@/components/bug-line'
 import { EmptyState } from '@/components/empty-state'
 import { useData, useVisibleBugs } from '@/lib/data-context'
+import { statusLabel } from '@/lib/status-rules'
 import type { BugStatus, Severity } from '@/lib/types'
 
 export default function DashboardPage() {
-  const { currentUser, recentActivity } = useData()
+  const { currentUser, recentActivity, hasQA } = useData()
   const bugs = useVisibleBugs(currentUser.role)
 
   const total = bugs.length
@@ -38,7 +39,7 @@ export default function DashboardPage() {
     Closed: '#94a3b8',
   }
   const statusData = (Object.keys(statusColors) as BugStatus[])
-    .map((s) => ({ label: s, value: count(s), color: statusColors[s] }))
+    .map((s) => ({ label: statusLabel(s, hasQA), value: count(s), color: statusColors[s] }))
     .filter((d) => d.value > 0)
 
   const sevColors: Record<Severity, string> = {

@@ -11,9 +11,11 @@ import {
   Copy,
   Download,
   FlaskConical,
+  Image as ImageIcon,
   ListChecks,
   MessageSquarePlus,
   Paperclip,
+  Pencil,
   RefreshCw,
   Send,
   Sparkles,
@@ -33,13 +35,15 @@ import {
 } from '@/components/badges'
 import { Avatar } from '@/components/ui/avatar'
 import { CodeBlock } from '@/components/ui/code-block'
-import { MonoTextarea, Select } from '@/components/ui/field'
+import { FieldHint, FieldError, Input, Label, MonoTextarea, Select, Textarea } from '@/components/ui/field'
 import { WorkflowTracker } from '@/components/workflow-tracker'
 import { ConfidenceMeter } from '@/components/confidence-meter'
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { useBug, useData, useProject } from '@/lib/data-context'
+import { allowedStatuses, statusLabel } from '@/lib/status-rules'
+import { checkLength, errorMessage, RULES } from '@/lib/validation'
 import type { AIAnalysis, Bug, Comment, Project, Role } from '@/lib/types'
 
 const roleBadge: Record<Role, string> = {
@@ -47,6 +51,20 @@ const roleBadge: Record<Role, string> = {
   QA: 'border-cyan-200 bg-cyan-50 text-cyan-700',
   Developer: 'border-indigo-200 bg-indigo-50 text-indigo-700',
 }
+
+const categoryOptions: Bug['category'][] = [
+  'Frontend',
+  'Backend',
+  'Database',
+  'API',
+  'Authentication',
+  'Security',
+  'Performance',
+  'UI/UX',
+  'Regression',
+  'Network',
+  'Other',
+]
 
 const commentAccent: Record<Comment['authorKind'], string> = {
   QA: 'bg-cyan',
@@ -61,6 +79,7 @@ function buildAgentPrompt(bug: Bug, project: Project | undefined, analysis?: AIA
     : 'Unknown stack'
   const rules = project?.businessRules.map((r) => `- ${r.title}: ${r.description}`).join('\n') || '- None specified'
   const evidence = bug.evidence
+    .filter((e) => e.type !== 'Screenshot')
     .map((e) => `### ${e.title} (${e.type})\n\`\`\`${e.language ?? ''}\n${e.content}\n\`\`\``)
     .join('\n\n')
 
@@ -86,9 +105,8 @@ ${bug.stepsToReproduce.map((s, i) => `${i + 1}. ${s}`).join('\n')}
 - Expected: ${bug.expectedResult}
 - Actual: ${bug.actualResult}
 - Environment: ${bug.environment} (${bug.browserDevice})
-${
-  analysis
-    ? `
+${analysis
+      ? `
 ## AI root-cause diagnosis (confidence ${analysis.confidence}%)
 ${analysis.rootCause}
 
@@ -98,8 +116,8 @@ ${analysis.suggestedFix.code ? `\n\`\`\`\n${analysis.suggestedFix.code}\n\`\`\``
 
 Recommended tests:
 ${analysis.recommendedTests.map((t) => `- ${t}`).join('\n')}`
-    : ''
-}
+      : ''
+    }
 
 ## Evidence
 ${evidence || 'No evidence attached.'}
@@ -115,11 +133,23 @@ export default function BugWorkspacePage() {
   const params = useParams<{ id: string }>()
   const bug = useBug(params.id)
   const { toast } = useToast()
-  const { members, addComment, setBugStatus, analyzeBug, currentUser, hasQA, assignBug } = useData()
+  const { members, addComment, updateBug, setBugStatus, analyzeBug, currentUser, hasQA, assignBug } = useData()
   const [tab, setTab] = useState('investigation')
   const [assignOpen, setAssignOpen] = useState(false)
   const [selected, setSelected] = useState<string[]>([])
   const [assigning, setAssigning] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [editForm, setEditForm] = useState({
+    title: '',
+    description: '',
+    category: 'Other' as Bug['category'],
+    stepsToReproduce: '',
+    expectedResult: '',
+    actualResult: '',
+    environment: '',
+    browserDevice: '',
+  })
 
   const project = useProject(bug?.projectId)
   const memberById = (id: string | undefined) => (id ? members.find((m) => m.id === id) : undefined)
@@ -163,8 +193,33 @@ export default function BugWorkspacePage() {
     )
   }
 
-  // Evidence added after the latest analysis -> suggest re-analysis (demo heuristic)
-  const staleAnalysis = analysis && bug.evidence.length > analysis.evidenceConsidered.length
+  // Evidence or report content changed after the latest analysis -> suggest
+  // re-analysis. Screenshots are display-only and never analyzed, so they
+  // don't count. Report edits bump bug.reportRevision (see backend patch_bug).
+  const analyzedEvidence = bug.evidence.filter((e) => e.type !== 'Screenshot').length
+  const staleEvidence = analysis ? analyzedEvidence > analysis.evidenceConsidered.length : false
+  const staleReport = analysis ? (bug.reportRevision ?? 0) > (analysis.reportRevision ?? 0) : false
+  const staleAnalysis = staleEvidence || staleReport
+
+  const canEditReport =
+    currentUser.role === 'Admin' ||
+    bug.reporterId === currentUser.id ||
+    bug.assigneeIds.includes(currentUser.id) ||
+    (project?.memberIds ?? []).includes(currentUser.id)
+
+  const openEdit = () => {
+    setEditForm({
+      title: bug.title,
+      description: bug.description,
+      category: bug.category,
+      stepsToReproduce: bug.stepsToReproduce.join('\n'),
+      expectedResult: bug.expectedResult,
+      actualResult: bug.actualResult,
+      environment: bug.environment,
+      browserDevice: bug.browserDevice,
+    })
+    setEditOpen(true)
+  }
 
   const runAnalysis = async () => {
     setAnalyzing(true)
@@ -182,16 +237,37 @@ export default function BugWorkspacePage() {
   }
 
   const addCommentHere = async () => {
-    if (!comment.trim()) return
     const body = comment.trim()
+    if (!body) return
+    if (body.length > RULES.comment.max) {
+      toast({
+        kind: 'error',
+        title: 'Comment too long',
+        description: `Comments are limited to ${RULES.comment.max} characters.`,
+      })
+      return
+    }
     setComment('')
     try {
       await addComment(bug.id, body)
       toast({ kind: 'success', title: 'Comment added' })
-    } catch {
+    } catch (err) {
       setComment(body)
-      toast({ kind: 'error', title: 'Could not add comment', description: 'Please try again.' })
+      toast({ kind: 'error', title: 'Could not add comment', description: errorMessage(err) })
     }
+  }
+
+  const exportPrompt = () => {
+    const blob = new Blob([promptDraft], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `bug-${bug.ref.replace('#', '')}-agent-prompt.txt`
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    toast({ kind: 'success', title: 'Exported', description: `Saved as bug-${bug.ref.replace('#', '')}-agent-prompt.txt` })
   }
 
   const copyPrompt = async () => {
@@ -207,12 +283,53 @@ export default function BugWorkspacePage() {
 
   const changeStatus = async (status: Bug['status']) => {
     try {
-      await setBugStatus(bug.id, status)
-      toast({ kind: 'success', title: 'Status updated' })
-    } catch {
-      toast({ kind: 'error', title: 'Could not update status' })
+      const updated = await setBugStatus(bug.id, status)
+      let description: string | undefined
+      if (updated.status !== status) {
+        description =
+          updated.status === 'QA Validation' && !hasQA
+            ? `Moved to ${statusLabel(updated.status, hasQA)} - waiting for the reporter's validation.`
+            : `Moved to ${statusLabel(updated.status, hasQA)} - waiting for QA validation.`
+      }
+      toast({
+        kind: 'success',
+        title: 'Status updated',
+        description,
+      })
+    } catch (err) {
+      toast({
+        kind: 'error',
+        title: 'Could not update status',
+        description: err instanceof Error ? err.message : undefined,
+      })
     }
   }
+
+  const statusOptions = allowedStatuses({
+    status: bug.status,
+    role: currentUser.role,
+    hasQA,
+    isTeamMember: currentUser.role === 'Admin' || (project?.memberIds ?? []).includes(currentUser.id),
+    // Reporter validates only when someone else made the fix (self-fix = plain dev).
+    isReporter: bug.reporterId === currentUser.id && bug.reporterId !== bug.resolvedBy,
+  })
+  const isValidatable = bug.status === 'Resolved' || bug.status === 'QA Validation'
+  // With no QA workflow, the reporter of the bug validates fixes made by others.
+  const isReporterValidator =
+    !hasQA &&
+    currentUser.role !== 'Admin' &&
+    bug.reporterId === currentUser.id &&
+    bug.reporterId !== bug.resolvedBy
+  const canValidate = (hasQA || isReporterValidator) && isValidatable && statusOptions.includes('Closed')
+  const canReject = (hasQA || isReporterValidator) && isValidatable && statusOptions.includes('In Progress') && canValidate
+  // No-QA workspace: when the fix is made by someone other than the reporter,
+  // the reporter takes the QA role and validates it (self-fixed bugs skip this).
+  const reporterValidates =
+    !hasQA &&
+    (bug.status === 'QA Validation' ||
+      (bug.status !== 'Resolved' &&
+        bug.status !== 'Closed' &&
+        bug.assigneeIds.some((id) => id !== bug.reporterId)))
 
   const teamMembers = (project?.memberIds ?? [])
     .map((id) => memberById(id))
@@ -234,6 +351,57 @@ export default function BugWorkspacePage() {
     }
   }
 
+  const editTitleError = checkLength(editForm.title, RULES.bugTitle.min, 'Title', RULES.bugTitle.max)
+  const editDescriptionError = checkLength(
+    editForm.description,
+    RULES.bugDescription.min,
+    'Description',
+    RULES.bugDescription.max,
+  )
+
+  const saveEdit = async () => {
+    if (editTitleError || editDescriptionError) {
+      toast({
+        kind: 'error',
+        title: 'Check the highlighted fields',
+        description: editTitleError ?? editDescriptionError ?? undefined,
+      })
+      return
+    }
+    setSavingEdit(true)
+    try {
+      await updateBug(bug.id, {
+        title: editForm.title.trim(),
+        description: editForm.description,
+        category: editForm.category,
+        stepsToReproduce: editForm.stepsToReproduce
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean),
+        expectedResult: editForm.expectedResult,
+        actualResult: editForm.actualResult,
+        environment: editForm.environment,
+        browserDevice: editForm.browserDevice,
+      })
+      setEditOpen(false)
+      toast({
+        kind: 'success',
+        title: 'Report updated',
+        description: analyses.length
+          ? 'The current AI analysis is now marked stale - re-run it to incorporate your changes.'
+          : undefined,
+      })
+    } catch (err) {
+      toast({
+        kind: 'error',
+        title: 'Could not update report',
+        description: errorMessage(err, 'Unknown error'),
+      })
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
   const tabs = [
     { id: 'investigation', label: 'Investigation' },
     { id: 'evidence', label: 'Evidence', count: bug.evidence.length },
@@ -251,6 +419,14 @@ export default function BugWorkspacePage() {
         title={bug.title}
         actions={
           <div className="flex items-center gap-2">
+            {canEditReport && (
+              <button
+                onClick={openEdit}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+              >
+                <Pencil className="size-4" />Edit report
+              </button>
+            )}
             <button
               onClick={() => {
                 setSelected(bug.assigneeIds)
@@ -300,7 +476,7 @@ export default function BugWorkspacePage() {
                   <div className="max-h-64 space-y-1 overflow-y-auto">
                     {teamMembers.length === 0 ? (
                       <p className="px-2 py-4 text-center text-sm text-muted-foreground">
-                        No team members yet — add them from the project&apos;s Team tab.
+                        No team members yet - add them from the project&apos;s Team tab.
                       </p>
                     ) : (
                       teamMembers.map((m) => {
@@ -350,12 +526,140 @@ export default function BugWorkspacePage() {
           document.body,
         )}
 
+      {editOpen &&
+        createPortal(
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setEditOpen(false)}>
+            <div className="w-full max-w-2xl" onClick={(e) => e.stopPropagation()}>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between !py-4">
+                  <CardTitle>Edit report - {bug.ref}</CardTitle>
+                  <button onClick={() => setEditOpen(false)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close">
+                    <X className="size-4" />
+                  </button>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                    <span>
+                      Add anything you learned since filing - new error output, failed fix attempts, exact steps.
+                      The current AI analysis will be marked stale so you can re-run it with the updated report.
+                    </span>
+                  </div>
+                  <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+                    <div>
+                      <Label htmlFor="edit-title">Title</Label>
+                      <Input
+                        id="edit-title"
+                        value={editForm.title}
+                        onChange={(e) => setEditForm((f) => ({ ...f, title: e.target.value }))}
+                        aria-invalid={Boolean(editTitleError)}
+                      />
+                      <FieldHint>At least {RULES.bugTitle.min} characters.</FieldHint>
+                      <FieldError>{editTitleError}</FieldError>
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-category">Category</Label>
+                      <Select
+                        id="edit-category"
+                        value={editForm.category}
+                        onChange={(e) => setEditForm((f) => ({ ...f, category: e.target.value as Bug['category'] }))}
+                      >
+                        {categoryOptions.map((c) => <option key={c}>{c}</option>)}
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-description">Description</Label>
+                      <Textarea
+                        id="edit-description"
+                        value={editForm.description}
+                        onChange={(e) => setEditForm((f) => ({ ...f, description: e.target.value }))}
+                        className="min-h-24"
+                        aria-invalid={Boolean(editDescriptionError)}
+                      />
+                      <FieldHint>At least {RULES.bugDescription.min} characters - placeholder text blocks AI analysis.</FieldHint>
+                      <FieldError>{editDescriptionError}</FieldError>
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-steps">Steps to reproduce</Label>
+                      <Textarea
+                        id="edit-steps"
+                        value={editForm.stepsToReproduce}
+                        onChange={(e) => setEditForm((f) => ({ ...f, stepsToReproduce: e.target.value }))}
+                        placeholder="One step per line."
+                        className="min-h-24"
+                      />
+                      <FieldHint>One step per line. Numbered lists work best.</FieldHint>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="edit-expected">Expected result</Label>
+                        <Textarea
+                          id="edit-expected"
+                          value={editForm.expectedResult}
+                          onChange={(e) => setEditForm((f) => ({ ...f, expectedResult: e.target.value }))}
+                          className="min-h-20"
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-actual">Actual result</Label>
+                        <Textarea
+                          id="edit-actual"
+                          value={editForm.actualResult}
+                          onChange={(e) => setEditForm((f) => ({ ...f, actualResult: e.target.value }))}
+                          placeholder="Include any new error text here."
+                          className="min-h-20"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="edit-env">Environment</Label>
+                        <Input
+                          id="edit-env"
+                          value={editForm.environment}
+                          onChange={(e) => setEditForm((f) => ({ ...f, environment: e.target.value }))}
+                        />
+                      </div>
+                      <div>
+                        <Label htmlFor="edit-browser">Browser / device</Label>
+                        <Input
+                          id="edit-browser"
+                          value={editForm.browserDevice}
+                          onChange={(e) => setEditForm((f) => ({ ...f, browserDevice: e.target.value }))}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
+                    <button
+                      onClick={() => setEditOpen(false)}
+                      className="inline-flex h-9 items-center rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => void saveEdit()}
+                      disabled={savingEdit}
+                      className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-indigo px-3 text-sm font-medium text-white hover:bg-indigo/90 disabled:opacity-60"
+                    >
+                      <Check className="size-4" />
+                      {savingEdit ? 'Saving…' : 'Save changes'}
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>,
+          document.body,
+        )}
+
       <Card className="p-4">
         <WorkflowTracker
           status={bug.status}
-          hasQA={hasQA}
+          hasQA={hasQA || reporterValidates}
           fixer={assignees[0]?.name}
-          validator={validator?.name}
+          validator={validator?.name ?? (reporterValidates ? reporter?.name : undefined)}
+          validationLabel={statusLabel('QA Validation', hasQA)}
         />
       </Card>
 
@@ -468,14 +772,32 @@ export default function BugWorkspacePage() {
                     <Card key={e.id}>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
-                          {e.language ? <Code2 className="size-4 text-muted-foreground" /> : <Paperclip className="size-4 text-muted-foreground" />}
+                          {e.fileUrl ? (
+                            <ImageIcon className="size-4 text-muted-foreground" />
+                          ) : e.language ? (
+                            <Code2 className="size-4 text-muted-foreground" />
+                          ) : (
+                            <Paperclip className="size-4 text-muted-foreground" />
+                          )}
                           {e.title}
                           <span className="rounded-md bg-soft px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{e.type}</span>
                         </CardTitle>
                         <span className="text-xs text-muted-foreground">{addedBy?.name} · {e.addedAt}</span>
                       </CardHeader>
                       <CardContent>
-                        {e.language ? (
+                        {e.fileUrl ? (
+                          <div className="space-y-2">
+                            <a href={e.fileUrl} target="_blank" rel="noreferrer">
+                              <img
+                                src={e.fileUrl}
+                                alt={e.title}
+                                className="max-h-80 w-auto max-w-full rounded-lg border border-border bg-soft object-contain"
+                              />
+                            </a>
+                            <p className="text-xs text-muted-foreground">Display only - not sent to the AI analysis.</p>
+                            {e.content && <p className="text-sm leading-relaxed text-muted-foreground">{e.content}</p>}
+                          </div>
+                        ) : e.language ? (
                           <CodeBlock code={e.content} language={e.language} label={e.type} />
                         ) : (
                           <p className="text-sm leading-relaxed text-muted-foreground">{e.content}</p>
@@ -497,7 +819,14 @@ export default function BugWorkspacePage() {
                   {staleAnalysis && (
                     <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
                       <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                      <span>New evidence was added after this analysis. <button onClick={runAnalysis} className="font-semibold underline">Re-run analysis</button> to incorporate it.</span>
+                      <span>
+                        {staleReport && staleEvidence
+                          ? 'The report and evidence changed after this analysis. '
+                          : staleReport
+                            ? 'The report was edited after this analysis. '
+                            : 'New evidence was added after this analysis. '}
+                        <button onClick={runAnalysis} className="font-semibold underline">Re-run analysis</button> to incorporate it.
+                      </span>
                     </div>
                   )}
 
@@ -647,7 +976,7 @@ export default function BugWorkspacePage() {
                     <ContextRow label="Bug details" ok />
                     <ContextRow label="Reproduction steps" ok={bug.stepsToReproduce.length > 0} />
                     <ContextRow label="Project stack & rules" ok={!!project} />
-                    <ContextRow label={`Evidence (${bug.evidence.length})`} ok={bug.evidence.length > 0} />
+                    <ContextRow label={`Evidence (${analyzedEvidence})`} ok={bug.evidence.length > 0} />
                     <ContextRow label="AI diagnosis" ok={!!analysis} />
                     <button
                       onClick={() => setPromptDraft(prompt)}
@@ -662,7 +991,7 @@ export default function BugWorkspacePage() {
                   <CardHeader>
                     <CardTitle className="flex items-center gap-2"><Code2 className="size-4 text-muted-foreground" />Coding-agent prompt</CardTitle>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => toast({ kind: 'info', title: 'Exported', description: 'Prompt saved as bug-' + bug.ref.replace('#', '') + '.md' })} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted">
+                      <button onClick={exportPrompt} className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-border px-2.5 text-xs font-medium hover:bg-muted">
                         <Download className="size-3.5" />Export
                       </button>
                       <button onClick={copyPrompt} className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-indigo px-2.5 text-xs font-medium text-white hover:bg-indigo/90">
@@ -711,23 +1040,32 @@ export default function BugWorkspacePage() {
           <Card>
             <CardHeader><CardTitle>Status</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <Select
-                value={bug.status}
-                onChange={(e) => changeStatus(e.target.value as Bug['status'])}
-                disabled={currentUser.role === 'QA' && bug.status === 'In Progress'}
-              >
-                {['Submitted', 'Assigned', 'In Progress', 'Resolved', 'QA Validation', 'Closed'].map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </Select>
-              {bug.status === 'Resolved' && hasQA && currentUser.role !== 'Developer' && (
+              {statusOptions.length > 0 ? (
+                <Select
+                  value={bug.status}
+                  onChange={(e) => changeStatus(e.target.value as Bug['status'])}
+                >
+                  {[bug.status, ...statusOptions.filter((s) => s !== bug.status)].map((s) => (
+                    <option key={s} value={s}>{statusLabel(s, hasQA)}</option>
+                  ))}
+                </Select>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  No status actions available for your role.
+                </p>
+              )}
+              {(canValidate || canReject) && (
                 <div className="grid grid-cols-2 gap-2">
-                  <button onClick={() => changeStatus('Closed')} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-600/90">
-                    <Check className="size-4" />Validate
-                  </button>
-                  <button onClick={() => changeStatus('In Progress')} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted">
-                    Reject
-                  </button>
+                  {canValidate && (
+                    <button onClick={() => changeStatus('Closed')} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-medium text-white hover:bg-emerald-600/90">
+                      <Check className="size-4" />Validate
+                    </button>
+                  )}
+                  {canReject && (
+                    <button onClick={() => changeStatus('In Progress')} className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted">
+                      Reject
+                    </button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -767,6 +1105,8 @@ function timelineColor(kind: Bug['timeline'][number]['kind']) {
       return 'bg-blue-500'
     case 'closed':
       return 'bg-slate-400'
+    case 'edited':
+      return 'bg-amber-500'
     default:
       return 'bg-indigo'
   }

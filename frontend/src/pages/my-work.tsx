@@ -3,7 +3,7 @@ import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { BugLine } from '@/components/bug-line'
 import { EmptyState } from '@/components/empty-state'
-import { useData } from '@/lib/data-context'
+import { useData, useVisibleBugs } from '@/lib/data-context'
 import type { Bug } from '@/lib/types'
 
 function Section({
@@ -46,7 +46,9 @@ function Section({
 }
 
 export default function MyWorkPage() {
-  const { bugs, currentUser } = useData()
+  const { currentUser, hasQA } = useData()
+  // Same visibility rule as the bugs page: only bugs inside your projects.
+  const bugs = useVisibleBugs(currentUser.role)
   const mine = bugs.filter((b) => b.assigneeIds.includes(currentUser.id) || b.reporterId === currentUser.id)
 
   const assigned = bugs.filter(
@@ -58,7 +60,9 @@ export default function MyWorkPage() {
       ? bugs.filter((b) => b.status === 'QA Validation' || b.status === 'Resolved')
       : bugs.filter(
           (b) =>
-            (b.validatorId === currentUser.id && b.status === 'Resolved') ||
+            (b.validatorId === currentUser.id &&
+              (b.status === 'Resolved' || b.status === 'QA Validation')) ||
+            (!hasQA && b.reporterId === currentUser.id && b.status === 'QA Validation') ||
             (b.assigneeIds.includes(currentUser.id) && b.needsAttention === true),
         )
   const recentlyResolved = mine.filter((b) => ['Resolved', 'Closed'].includes(b.status))
@@ -93,7 +97,7 @@ export default function MyWorkPage() {
           emptyDesc={
             currentUser.role === 'QA'
               ? 'Resolved bugs waiting for validation appear here.'
-              : 'Rejected bugs waiting for your changes appear here.'
+              : 'Rejected fixes waiting for your changes, and fixes waiting for your validation, appear here.'
           }
         />
         <Section

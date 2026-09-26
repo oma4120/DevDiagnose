@@ -66,9 +66,15 @@ export function Sidebar({ open, onClose }: { open: boolean; onClose: () => void 
         {/* Workspace switcher */}
         <div className="px-3 pb-2">
           <button className="flex w-full items-center gap-2 rounded-lg border border-sidebar-border bg-sidebar-accent px-2.5 py-2 text-left transition-colors hover:border-slate-600">
-            <span className="flex size-6 items-center justify-center rounded bg-cyan text-[11px] font-bold text-white">
-              {company.name[0]}
-            </span>
+            {company.logo ? (
+              <span className="flex size-6 items-center justify-center overflow-hidden rounded bg-cyan">
+                <img src={company.logo} alt="" className="size-full object-contain" />
+              </span>
+            ) : (
+              <span className="flex size-6 items-center justify-center rounded bg-cyan text-[11px] font-bold text-white">
+                {(company.name || '?')[0]}
+              </span>
+            )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-xs font-medium text-white">{company.name}</span>
               <span className="block truncate text-[11px] text-slate-400">Workspace</span>

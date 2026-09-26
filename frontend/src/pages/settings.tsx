@@ -1,46 +1,59 @@
 import { useState } from 'react'
-import { Bell, User } from 'lucide-react'
+import { User } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Input, Label } from '@/components/ui/field'
+import { FieldError, FieldHint, Input, Label } from '@/components/ui/field'
 import { Avatar } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { useData } from '@/lib/data-context'
+import { api } from '@/lib/api'
+import { errorMessage } from '@/lib/validation'
 
-const sections = [
-  { id: 'profile', label: 'Profile', icon: User },
-  { id: 'notifications', label: 'Notifications', icon: Bell },
-]
-
-function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange: () => void; label: string; hint?: string }) {
-  return (
-    <div className="flex items-start justify-between gap-3 py-3">
-      <div>
-        <p className="text-sm font-medium text-foreground">{label}</p>
-        {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
-      </div>
-      <button
-        role="switch"
-        aria-checked={checked}
-        aria-label={label}
-        onClick={onChange}
-        className={cn('relative h-6 w-11 shrink-0 rounded-full transition-colors', checked ? 'bg-indigo' : 'bg-muted-foreground/30')}
-      >
-        <span className={cn('absolute left-0.5 top-0.5 size-5 rounded-full bg-white shadow transition-transform', checked ? 'translate-x-5' : 'translate-x-0')} />
-      </button>
-    </div>
-  )
-}
+const sections = [{ id: 'profile', label: 'Profile', icon: User }]
 
 export default function SettingsPage() {
   const [active, setActive] = useState('profile')
   const { toast } = useToast()
   const { currentUser } = useData()
-  const [emailNotif, setEmailNotif] = useState(true)
-  const [aiNotif, setAiNotif] = useState(true)
+  const [current, setCurrent] = useState('')
+  const [next, setNext] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [touched, setTouched] = useState(false)
 
-  const save = () => toast({ kind: 'success', title: 'Settings saved' })
+  // Same policy as the invite screen (and backend/app/schemas.py).
+  const rules = [
+    { label: 'At least 8 characters', ok: next.length >= 8 },
+    { label: 'One uppercase letter', ok: /[A-Z]/.test(next) },
+    { label: 'One number', ok: /\d/.test(next) },
+    { label: 'One symbol (!@#$)', ok: /[^A-Za-z0-9]/.test(next) },
+    { label: 'Passwords match', ok: confirm.length > 0 && next === confirm },
+  ]
+  const rulesOk = rules.every((r) => r.ok)
+  const currentError = touched && !current ? 'Enter your current password' : null
+
+  const save = async () => {
+    setTouched(true)
+    if (!current) return
+    if (!rulesOk) {
+      toast({ kind: 'error', title: 'Password does not meet the rules', description: 'Check every rule below the new password field.' })
+      return
+    }
+    setSaving(true)
+    try {
+      await api.auth.changePassword({ currentPassword: current, newPassword: next })
+      setCurrent('')
+      setNext('')
+      setConfirm('')
+      setTouched(false)
+      toast({ kind: 'success', title: 'Password updated', description: 'Use the new password the next time you sign in.' })
+    } catch (err) {
+      toast({ kind: 'error', title: 'Could not update password', description: errorMessage(err) })
+    } finally {
+      setSaving(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
@@ -76,49 +89,51 @@ export default function SettingsPage() {
                   <div className="min-w-0 flex-1">
                     <p className="font-medium text-foreground">{currentUser.name}</p>
                     <p className="truncate text-sm text-muted-foreground">{currentUser.email}</p>
-                  </div>
-                  <button className="rounded-lg border border-border px-3 py-2 text-sm font-medium hover:bg-muted">Change avatar</button>
-                </div>
-                <div>
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" defaultValue={currentUser.email} />
-                </div>
-                <SaveButton onClick={save} />
-                <div className="grid gap-4 border-t border-border pt-4 sm:grid-cols-2">
-                  <div><Label htmlFor="cur">Current password</Label><Input id="cur" type="password" placeholder="••••••••" /></div>
-                  <div className="sm:col-span-2 grid gap-4 sm:grid-cols-2">
-                    <div><Label htmlFor="new">New password</Label><Input id="new" type="password" placeholder="••••••••" /></div>
-                    <div><Label htmlFor="conf">Confirm password</Label><Input id="conf" type="password" placeholder="••••••••" /></div>
+                    <p className="text-xs text-muted-foreground">{currentUser.role}</p>
                   </div>
                 </div>
-                <SaveButton onClick={save} label="Update password" />
-              </CardContent>
-            </Card>
-          )}
 
-          {active === 'notifications' && (
-            <Card>
-              <CardHeader><CardTitle>Notifications</CardTitle></CardHeader>
-              <CardContent className="divide-y divide-border">
-                <Toggle checked={emailNotif} onChange={() => setEmailNotif(!emailNotif)} label="Email notifications" hint="Assignments and validation requests." />
-                <Toggle checked={aiNotif} onChange={() => setAiNotif(!aiNotif)} label="AI analysis alerts" hint="Notify me when analysis completes." />
-                <div className="pt-3"><SaveButton onClick={save} /></div>
+                <div className="border-t border-border pt-4">
+                  <h3 className="text-sm font-semibold text-foreground">Change password</h3>
+                  <div className="mt-3 space-y-3">
+                    <div>
+                      <Label htmlFor="cur">Current password</Label>
+                      <Input id="cur" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} aria-invalid={Boolean(currentError)} />
+                      <FieldError>{currentError}</FieldError>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div>
+                        <Label htmlFor="new">New password</Label>
+                        <Input id="new" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} />
+                        <FieldHint>Use the same policy as invitations.</FieldHint>
+                      </div>
+                      <div>
+                        <Label htmlFor="conf">Confirm password</Label>
+                        <Input id="conf" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+                      </div>
+                    </div>
+                    <ul className="space-y-1">
+                      {rules.map((r) => (
+                        <li key={r.label} className={cn('text-xs', r.ok ? 'text-emerald-600' : 'text-muted-foreground')}>
+                          {r.ok ? '✓' : '○'} {r.label}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                <button
+                  onClick={save}
+                  disabled={saving}
+                  className="inline-flex h-9 items-center rounded-lg bg-indigo px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90 disabled:opacity-60"
+                >
+                  {saving ? 'Updating…' : 'Update password'}
+                </button>
               </CardContent>
             </Card>
           )}
         </div>
       </div>
     </div>
-  )
-}
-
-function SaveButton({ onClick, label = 'Save changes' }: { onClick: () => void; label?: string }) {
-  return (
-    <button
-      onClick={onClick}
-      className="inline-flex h-9 items-center rounded-lg bg-indigo px-4 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90"
-    >
-      {label}
-    </button>
   )
 }

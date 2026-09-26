@@ -6,6 +6,7 @@ import { Select } from '@/components/ui/field'
 import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
 import { useData, useVisibleBugs, useVisibleProjects } from '@/lib/data-context'
+import { statusLabel } from '@/lib/status-rules'
 import type { BugStatus, Category, Severity } from '@/lib/types'
 
 const statuses: (BugStatus | 'All')[] = [
@@ -32,7 +33,7 @@ const categories: (Category | 'All')[] = [
 ]
 
 export default function BugsPage() {
-  const { members, currentUser } = useData()
+  const { members, currentUser, hasQA } = useData()
   const visibleProjects = useVisibleProjects(currentUser.role)
   const visibleBugs = useVisibleBugs(currentUser.role)
   const [query, setQuery] = useState('')
@@ -119,7 +120,7 @@ export default function BugsPage() {
             ))}
           </Select>
           <Select value={status} onChange={(e) => setStatus(e.target.value as BugStatus | 'All')}>
-            {statuses.map((s) => <option key={s} value={s}>{s === 'All' ? 'All statuses' : s}</option>)}
+            {statuses.map((s) => <option key={s} value={s}>{s === 'All' ? 'All statuses' : statusLabel(s, hasQA)}</option>)}
           </Select>
           <Select value={severity} onChange={(e) => setSeverity(e.target.value as Severity | 'All')}>
             {severities.map((s) => <option key={s} value={s}>{s === 'All' ? 'All severities' : s}</option>)}
@@ -167,7 +168,12 @@ export default function BugsPage() {
                   Open project
                 </Link>
               </div>
-              <BugBoard bugs={sectionBugs} members={members} />
+              <BugBoard
+                bugs={sectionBugs}
+                members={members}
+                hasQA={hasQA}
+                expandDone={status === 'Closed' || query.trim() !== ''}
+              />
             </section>
           ))}
         </div>

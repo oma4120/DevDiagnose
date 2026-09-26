@@ -1,4 +1,4 @@
-import { Link, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
@@ -27,9 +27,9 @@ import { Avatar } from '@/components/ui/avatar'
 import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
 import { Input } from '@/components/ui/field'
-import { cn } from '@/lib/utils'
+import { byClosedDesc, cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
-import { useData, useProject } from '@/lib/data-context'
+import { useData, useProject, useProjectsBugStats } from '@/lib/data-context'
 import type { Member, Role } from '@/lib/types'
 
 const roleBadge: Record<Role, string> = {
@@ -40,15 +40,21 @@ const roleBadge: Record<Role, string> = {
 
 export default function ProjectOverviewPage() {
   const params = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const project = useProject(params.id)
   const { toast } = useToast()
-  const { bugs, members, currentUser, addProjectMember } = useData()
+  const { members, currentUser, hasQA, addProjectMember } = useData()
   const [tab, setTab] = useState('overview')
   const [addOpen, setAddOpen] = useState(false)
   const [addQuery, setAddQuery] = useState('')
   const [adding, setAdding] = useState(false)
 
-  const projectBugs = project ? bugs.filter((b) => b.projectId === project.id) : []
+  // Same visibility rule as the projects/bugs pages (non-members see nothing).
+  const { projectBugs, ...projectStats } = useProjectsBugStats(project?.id ?? '')
+  const recentlyClosed = projectBugs
+    .filter((b) => b.status === 'Closed')
+    .sort(byClosedDesc)
+    .slice(0, 5)
   const projectMembers = (project?.memberIds ?? [])
     .map((id) => members.find((m) => m.id === id))
     .filter((m): m is NonNullable<typeof m> => Boolean(m))
@@ -131,7 +137,7 @@ export default function ProjectOverviewPage() {
         actions={
           currentUser.role === 'Admin' && (
             <button
-              onClick={() => toast({ kind: 'info', title: 'Edit project', description: 'Open the project configuration wizard.' })}
+              onClick={() => navigate(`/projects/new?edit=${project.id}`)}
               className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
             >
               <Pencil className="size-4" />
@@ -164,10 +170,10 @@ export default function ProjectOverviewPage() {
       {tab === 'overview' && (
         <div className="space-y-6">
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-            <StatCard label="Open bugs" value={project.openBugs} icon={BugIcon} accent="text-violet-500" />
-            <StatCard label="High severity" value={project.highSeverity} icon={AlertTriangle} accent="text-orange-500" />
-            <StatCard label="Awaiting validation" value={project.awaitingValidation} icon={Clock} accent="text-amber-500" />
-            <StatCard label="Resolved" value={project.resolvedBugs} icon={ShieldCheck} accent="text-emerald-500" />
+            <StatCard label="Open bugs" value={projectStats.openBugs} icon={BugIcon} accent="text-violet-500" />
+            <StatCard label="High severity" value={projectStats.highSeverity} icon={AlertTriangle} accent="text-orange-500" />
+            <StatCard label="Awaiting validation" value={projectStats.awaitingValidation} icon={Clock} accent="text-amber-500" />
+            <StatCard label="Resolved" value={projectStats.resolvedBugs} icon={ShieldCheck} accent="text-emerald-500" />
           </div>
           <div className="grid gap-6 lg:grid-cols-2">
             <Card>
@@ -183,6 +189,35 @@ export default function ProjectOverviewPage() {
               </CardContent>
             </Card>
           </div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Recently closed</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {recentlyClosed.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No closed bugs yet.</p>
+              ) : (
+                <ul className="divide-y divide-border/60">
+                  {recentlyClosed.map((b) => (
+                    <li key={b.id} className="flex items-center justify-between gap-3 py-2 first:pt-0 last:pb-0">
+                      <div className="min-w-0">
+                        <Link
+                          to={`/bugs/${b.id}`}
+                          className="font-mono text-xs text-muted-foreground hover:text-indigo"
+                        >
+                          {b.ref}
+                        </Link>
+                        <Link to={`/bugs/${b.id}`} className="block truncate text-sm font-medium text-foreground hover:text-indigo">
+                          {b.title}
+                        </Link>
+                      </div>
+                      <span className="shrink-0 text-xs text-muted-foreground">{b.closedAt ?? b.updatedAt}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
         </div>
       )}
 
@@ -196,7 +231,7 @@ export default function ProjectOverviewPage() {
             {projectBugs.length === 0 ? (
               <EmptyState icon={BugIcon} title="No bugs reported for this project." className="border-0 py-8" />
             ) : (
-              <BugBoard bugs={projectBugs} members={members} />
+              <BugBoard bugs={projectBugs} members={members} hasQA={hasQA} />
             )}
           </CardContent>
         </Card>
@@ -275,42 +310,42 @@ export default function ProjectOverviewPage() {
                 </button>
               )}
             </CardHeader>
-          <div className="overflow-x-auto scroll-thin">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-soft text-left text-xs font-medium text-muted-foreground">
-                  <th className="px-4 py-2.5 font-medium">Name</th>
-                  <th className="px-4 py-2.5 font-medium">Role</th>
-                  <th className="px-4 py-2.5 font-medium">Status</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Assigned</th>
-                  <th className="px-4 py-2.5 text-right font-medium">Resolved</th>
-                  {currentUser.role === 'Admin' && <th className="px-4 py-2.5" />}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {projectMembers.map((m) => (
-                  <tr key={m.id} className="hover:bg-soft/60">
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <Avatar name={m.name} color={m.avatarColor} size="sm" />
-                        <div><p className="font-medium text-foreground">{m.name}</p><p className="text-xs text-muted-foreground">{m.email}</p></div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3"><span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', roleBadge[m.role])}>{m.role}</span></td>
-                    <td className="px-4 py-3 text-muted-foreground">{m.status}</td>
-                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.assignedBugs}</td>
-                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.resolvedBugs}</td>
-                    {currentUser.role === 'Admin' && (
-                      <td className="px-4 py-3 text-right">
-                        <button onClick={() => toast({ kind: 'info', title: 'Remove member?', description: `${m.name} would lose project access.` })} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-error" aria-label={`Remove ${m.name}`}><UserMinus className="size-4" /></button>
-                      </td>
-                    )}
+            <div className="overflow-x-auto scroll-thin">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border bg-soft text-left text-xs font-medium text-muted-foreground">
+                    <th className="px-4 py-2.5 font-medium">Name</th>
+                    <th className="px-4 py-2.5 font-medium">Role</th>
+                    <th className="px-4 py-2.5 font-medium">Status</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Assigned</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Resolved</th>
+                    {currentUser.role === 'Admin' && <th className="px-4 py-2.5" />}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {projectMembers.map((m) => (
+                    <tr key={m.id} className="hover:bg-soft/60">
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <Avatar name={m.name} color={m.avatarColor} size="sm" />
+                          <div><p className="font-medium text-foreground">{m.name}</p><p className="text-xs text-muted-foreground">{m.email}</p></div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3"><span className={cn('inline-flex rounded-full border px-2 py-0.5 text-xs font-medium', roleBadge[m.role])}>{m.role}</span></td>
+                      <td className="px-4 py-3 text-muted-foreground">{m.status}</td>
+                      <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.assignedBugs}</td>
+                      <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.resolvedBugs}</td>
+                      {currentUser.role === 'Admin' && (
+                        <td className="px-4 py-3 text-right">
+                          <button onClick={() => toast({ kind: 'info', title: 'Remove member?', description: `${m.name} would lose project access.` })} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-error" aria-label={`Remove ${m.name}`}><UserMinus className="size-4" /></button>
+                        </td>
+                      )}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
         </>
       )}
 
@@ -371,7 +406,7 @@ export default function ProjectOverviewPage() {
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-indigo" />
                 <div>
                   <p className="text-sm text-foreground">
-                    <span className="font-mono text-muted-foreground">{b.ref}</span> {b.title} — <span className="text-muted-foreground">{b.status}</span>
+                    <span className="font-mono text-muted-foreground">{b.ref}</span> {b.title} - <span className="text-muted-foreground">{b.status}</span>
                   </p>
                   <p className="text-xs text-muted-foreground">Updated {b.updatedAt}</p>
                 </div>

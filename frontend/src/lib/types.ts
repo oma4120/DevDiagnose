@@ -21,6 +21,8 @@ export type Category =
   | 'Security'
   | 'Performance'
   | 'UI/UX'
+  | 'Regression'
+  | 'Network'
   | 'Other'
 
 export type EvidenceType =
@@ -30,7 +32,16 @@ export type EvidenceType =
   | 'Server Log'
   | 'Stack Trace'
   | 'Relevant Code'
+  | 'Network Request'
+  | 'Screen Recording'
   | 'Other'
+
+export interface Company {
+  name: string
+  workspace: string
+  hasQA: boolean
+  logo?: string | null
+}
 
 export interface Member {
   id: string
@@ -144,12 +155,13 @@ export interface AIAnalysis {
   confidence: number
   uncertainty: string | null
   evidenceConsidered: string[]
+  reportRevision?: number
   inputContext?: Record<string, unknown>
 }
 
 export interface WorkflowEvent {
   id: string
-  kind: 'created' | 'assigned' | 'ai' | 'comment' | 'status' | 'resolved' | 'validated' | 'closed'
+  kind: 'created' | 'assigned' | 'ai' | 'comment' | 'status' | 'resolved' | 'validated' | 'closed' | 'edited'
   label: string
   actor: string
   at: string
@@ -183,6 +195,7 @@ export interface Bug {
   resolvedBy?: string
   resolvedAt?: string
   closedAt?: string
+  reportRevision?: number
 }
 
 export interface NotificationItem {

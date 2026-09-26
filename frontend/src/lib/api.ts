@@ -4,6 +4,7 @@ import type {
   Bug,
   BugStatus,
   Comment,
+  Company,
   InviteResult,
   InviteStatus,
   Member,
@@ -35,7 +36,7 @@ export function setToken(token: string | null): void {
 
 export interface BootstrapData {
   currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
-  company: { name: string; workspace: string; hasQA: boolean }
+  company: Company
   members: Member[]
   projects: Project[]
   bugs: Bug[]
@@ -59,7 +60,16 @@ async function http<T>(path: string, init?: RequestInit): Promise<T> {
     let detail = `${res.status} ${res.statusText}`
     try {
       const body = await res.json()
-      if (body?.detail) detail = typeof body.detail === 'string' ? body.detail : JSON.stringify(body.detail)
+      const raw = body?.detail
+      if (typeof raw === 'string') {
+        detail = raw
+      } else if (Array.isArray(raw)) {
+        // FastAPI/pydantic validation errors: show the first readable message.
+        const first = raw.find((e) => typeof e?.msg === 'string')
+        detail = first ? first.msg : JSON.stringify(raw)
+      } else if (raw) {
+        detail = JSON.stringify(raw)
+      }
     } catch {
       /* ignore parse error */
     }
@@ -76,6 +86,11 @@ export const api = {
       http<{ token: string; user: Member }>('/auth/login', {
         method: 'POST',
         body: JSON.stringify({ email, password }),
+      }),
+    changePassword: (payload: { currentPassword: string; newPassword: string }) =>
+      http<{ ok: boolean }>('/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify(payload),
       }),
   },
 
@@ -99,8 +114,15 @@ export const api = {
     get: (id: string) => http<Project>(`/projects/${id}`),
     create: (payload: Partial<Project>) =>
       http<Project>('/projects', { method: 'POST', body: JSON.stringify(payload) }),
+    update: (id: string, fields: Partial<Project>) =>
+      http<Project>(`/projects/${id}`, { method: 'PATCH', body: JSON.stringify(fields) }),
     addMember: (projectId: string, memberId: string) =>
       http<Project>(`/projects/${projectId}/members`, { method: 'POST', body: JSON.stringify({ memberId }) }),
+  },
+
+  company: {
+    update: (payload: { name?: string; workspace?: string; hasQA?: boolean; logo?: string | null }) =>
+      http<Company>('/company', { method: 'PATCH', body: JSON.stringify(payload) }),
   },
 
   members: {

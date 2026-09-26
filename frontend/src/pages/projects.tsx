@@ -8,16 +8,29 @@ import { Select } from '@/components/ui/field'
 import { AvatarGroup } from '@/components/ui/avatar'
 import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
-import { useData } from '@/lib/data-context'
+import { projectBugStats, useData, useVisibleBugs, useVisibleProjects } from '@/lib/data-context'
 
 export default function ProjectsPage() {
-  const { projects, members, currentUser } = useData()
+  const { members, currentUser } = useData()
+  const visibleProjects = useVisibleProjects(currentUser.role)
+  const visibleBugs = useVisibleBugs(currentUser.role)
   const [query, setQuery] = useState('')
   const [type, setType] = useState('All')
   const [view, setView] = useState<'cards' | 'table'>('cards')
 
+  // Counters are derived from the live bug list so cards, tables and the
+  // project overview always agree (the stored fields are kept in sync too).
+  const statsByProject = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof projectBugStats>>()
+    for (const p of visibleProjects) {
+      map.set(p.id, projectBugStats(visibleBugs.filter((b) => b.projectId === p.id)))
+    }
+    return map
+  }, [visibleProjects, visibleBugs])
+  const statsFor = (id: string) => statsByProject.get(id) ?? projectBugStats([])
+
   const filtered = useMemo(() => {
-    return projects.filter((p) => {
+    return visibleProjects.filter((p) => {
       const matchesQuery =
         !query ||
         p.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -28,7 +41,7 @@ export default function ProjectsPage() {
       const matchesType = type === 'All' || p.type === type
       return matchesQuery && matchesType
     })
-  }, [query, type, projects])
+  }, [query, type, visibleProjects])
 
   // Hybrid: switch to table automatically while actively searching/filtering
   const effectiveView = query || type !== 'All' ? 'table' : view
@@ -117,8 +130,8 @@ export default function ProjectsPage() {
                 </div>
                 <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
                   <div className="flex items-center gap-3 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><Bug className="size-3.5" />{p.openBugs} open</span>
-                    <span className="flex items-center gap-1 text-orange-600"><AlertTriangle className="size-3.5" />{p.highSeverity} high</span>
+                    <span className="flex items-center gap-1"><Bug className="size-3.5" />{statsFor(p.id).openBugs} open</span>
+                    <span className="flex items-center gap-1 text-orange-600"><AlertTriangle className="size-3.5" />{statsFor(p.id).highSeverity} high</span>
                   </div>
                   <AvatarGroup people={membersOf(p.memberIds)} size="xs" max={3} />
                 </div>
@@ -156,8 +169,8 @@ export default function ProjectsPage() {
                         ))}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">{p.openBugs}</td>
-                    <td className="px-4 py-3 text-right font-mono text-orange-600">{p.highSeverity}</td>
+                    <td className="px-4 py-3 text-right font-mono text-muted-foreground">{statsFor(p.id).openBugs}</td>
+                    <td className="px-4 py-3 text-right font-mono text-orange-600">{statsFor(p.id).highSeverity}</td>
                     <td className="px-4 py-3"><AvatarGroup people={membersOf(p.memberIds)} size="xs" max={3} /></td>
                     <td className="px-4 py-3 text-muted-foreground">{p.updatedAt}</td>
                   </tr>

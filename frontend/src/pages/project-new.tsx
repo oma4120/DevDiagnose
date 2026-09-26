@@ -1,11 +1,13 @@
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import {
   ArrowLeft,
   ArrowRight,
   Boxes,
   Check,
   FileText,
+  Folder,
   Info,
   Layers,
   Plus,
@@ -14,17 +16,22 @@ import {
   ShieldCheck,
   Sparkles,
   Trash2,
+  UserPlus,
   Users,
+  X,
 } from 'lucide-react'
 import { PageHeader } from '@/components/app-shell'
-import { Card, CardContent } from '@/components/ui/card'
-import { Input, Label, Select, Textarea, FieldHint } from '@/components/ui/field'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input, Label, Select, Textarea, FieldHint, FieldError } from '@/components/ui/field'
+import { Avatar } from '@/components/ui/avatar'
 import { TagInput } from '@/components/ui/tag-input'
 import { Chip } from '@/components/badges'
+import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
-import { useData } from '@/lib/data-context'
-import type { Role } from '@/lib/types'
+import { useData, useProject } from '@/lib/data-context'
+import { checkProjectName, checkUrl, errorMessage } from '@/lib/validation'
+import type { Member, Role } from '@/lib/types'
 
 const steps = [
   { id: 1, label: 'Basic Information', icon: FileText },
@@ -37,75 +44,182 @@ const steps = [
   { id: 8, label: 'Review', icon: Check },
 ]
 
-interface TeamRow {
-  name: string
-  role: Role | 'Other'
+const roleBadge: Record<Role, string> = {
+  Admin: 'border-amber-200 bg-amber-50 text-amber-700',
+  QA: 'border-cyan-200 bg-cyan-50 text-cyan-700',
+  Developer: 'border-indigo bg-indigo-50 text-indigo',
 }
+
 interface Rule {
+  id?: string
   title: string
   description: string
 }
 
 export default function NewProjectPage() {
   const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const editId = params.get('edit')
+  const isEdit = Boolean(editId)
+  const editing = useProject(editId ?? undefined)
   const { toast } = useToast()
-  const { currentUser, createProject } = useData()
+  const { currentUser, members, createProject, updateProject } = useData()
+  const isAdmin = currentUser.role === 'Admin'
   const [step, setStep] = useState(1)
   const [submitting, setSubmitting] = useState(false)
 
-  const [basic, setBasic] = useState({
-    name: 'Billing Service',
-    description: 'Subscription billing and invoicing microservice.',
-    purpose: 'Handle recurring charges, proration, and invoice generation reliably.',
-    type: 'API / Backend',
-  })
-  const [tech, setTech] = useState({
-    frontend: ['React', 'TypeScript'] as string[],
-    backend: ['FastAPI', 'Python'] as string[],
-    database: ['MongoDB'] as string[],
-    services: ['Stripe'] as string[],
-    auth: ['JWT'] as string[],
-    deployment: ['Vercel'] as string[],
-    other: [] as string[],
-  })
-  const [team, setTeam] = useState<TeamRow[]>([
-    { name: 'Omar Haddad', role: 'Developer' },
-    { name: 'Sara Nasser', role: 'QA' },
-  ])
-  const [env, setEnv] = useState({
-    development: 'localhost + Docker',
-    staging: 'staging.billing.northwind.dev',
-    production: 'billing.northwind.dev',
-    browsers: [] as string[],
-    platforms: ['Server'] as string[],
-    os: ['Linux'] as string[],
-  })
-  const [arch, setArch] = useState({
-    style: 'Event-driven microservice',
-    modules: ['Charges', 'Invoices', 'Webhooks'] as string[],
-    apiPatterns: 'REST with idempotency keys, versioned under /v1.',
-  })
-  const [rules, setRules] = useState<Rule[]>([
-    { title: 'Empty carts cannot be checked out', description: 'Checkout must reject empty carts with a 422.' },
-  ])
-  const [quality, setQuality] = useState({
-    testingTools: ['Postman', 'Pytest'] as string[],
-    frameworks: ['Vitest'] as string[],
-    conventions: 'PEP 8, conventional commits.',
-    constraints: 'p95 under 800ms.',
-    repoUrl: '',
-    docsUrl: '',
-  })
+  const [basic, setBasic] = useState(() => (
+    isEdit && editing
+      ? { name: editing.name, description: editing.description, purpose: editing.purpose, type: editing.type }
+      : {
+        name: 'Billing Service',
+        description: 'Subscription billing and invoicing microservice.',
+        purpose: 'Handle recurring charges, proration, and invoice generation reliably.',
+        type: 'API / Backend',
+      }
+  ))
+  const [tech, setTech] = useState(() => (
+    isEdit && editing
+      ? {
+        frontend: editing.frontend,
+        backend: editing.backend,
+        database: editing.database,
+        services: editing.services,
+        auth: editing.auth,
+        deployment: editing.deployment,
+      }
+      : {
+        frontend: ['React', 'TypeScript'] as string[],
+        backend: ['FastAPI', 'Python'] as string[],
+        database: ['MongoDB'] as string[],
+        services: ['Stripe'] as string[],
+        auth: ['JWT'] as string[],
+        deployment: ['Vercel'] as string[],
+      }
+  ))
+  const [teamIds, setTeamIds] = useState<string[]>(() => (
+    isEdit && editing ? [...editing.memberIds] : ['u1', 'u2']
+  ))
+  const [addOpen, setAddOpen] = useState(false)
+  const [addQuery, setAddQuery] = useState('')
+  const [env, setEnv] = useState(() => (
+    isEdit && editing
+      ? {
+        development: editing.environments?.development ?? '',
+        staging: editing.environments?.staging ?? '',
+        production: editing.environments?.production ?? '',
+        browsers: editing.browsers,
+        platforms: editing.platforms,
+        os: (editing.environments as { os?: string[] } | undefined)?.os ?? [],
+      }
+      : {
+        development: 'localhost + Docker',
+        staging: 'staging.billing.northwind.dev',
+        production: 'billing.northwind.dev',
+        browsers: [] as string[],
+        platforms: ['Server'] as string[],
+        os: ['Linux'] as string[],
+      }
+  ))
+  const [arch, setArch] = useState(() => (
+    isEdit && editing
+      ? { style: editing.architecture, modules: editing.modules, apiPatterns: editing.apiPatterns }
+      : {
+        style: 'Event-driven microservice',
+        modules: ['Charges', 'Invoices', 'Webhooks'] as string[],
+        apiPatterns: 'REST with idempotency keys, versioned under /v1.',
+      }
+  ))
+  const [rules, setRules] = useState<Rule[]>(() => (
+    isEdit && editing
+      ? editing.businessRules.map((r) => ({ id: r.id, title: r.title, description: r.description }))
+      : [{ title: 'Empty carts cannot be checked out', description: 'Checkout must reject empty carts with a 422.' }]
+  ))
+  const [quality, setQuality] = useState(() => (
+    isEdit && editing
+      ? {
+        testingTools: editing.testingTools,
+        frameworks: [] as string[],
+        conventions: editing.conventions,
+        constraints: editing.constraints,
+        repoUrl: editing.repoUrl ?? '',
+        docsUrl: editing.docsUrl ?? '',
+      }
+      : {
+        testingTools: ['Postman', 'Pytest'] as string[],
+        frameworks: ['Vitest'] as string[],
+        conventions: 'PEP 8, conventional commits.',
+        constraints: 'p95 under 800ms.',
+        repoUrl: '',
+        docsUrl: '',
+      }
+  ))
+
+  if (isEdit && !editing) {
+    return (
+      <div className="mx-auto max-w-3xl p-4 sm:p-6">
+        <EmptyState
+          icon={Folder}
+          title="Project not found"
+          description="This project may have been deleted or the link is incorrect."
+          action={
+            <button
+              onClick={() => navigate('/projects')}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-border px-3 text-sm font-medium hover:bg-muted"
+            >
+              <ArrowLeft className="size-4" />
+              Back to projects
+            </button>
+          }
+        />
+      </div>
+    )
+  }
+
+  const nameError = checkProjectName(basic.name)
+  const ruleError = rules.some((r) => !r.title.trim())
+    ? 'Each business rule needs a title'
+    : null
+  const repoError = checkUrl(quality.repoUrl, 'Repository URL')
+  const docsError = checkUrl(quality.docsUrl, 'Docs URL')
 
   const next = async () => {
+    if (step === 1 && nameError) {
+      toast({ kind: 'error', title: 'Check the project name', description: nameError })
+      return
+    }
+    if (step === 6 && ruleError) {
+      toast({ kind: 'error', title: 'Check the business rules', description: ruleError })
+      return
+    }
+    if (step === 7 && (repoError || docsError)) {
+      toast({ kind: 'error', title: 'Check the links', description: repoError ?? docsError ?? undefined })
+      return
+    }
     if (step < 8) {
       setStep(step + 1)
       return
     }
+    // The step rail lets people jump around, so re-check everything on submit.
+    if (nameError) {
+      setStep(1)
+      toast({ kind: 'error', title: 'Check the project name', description: nameError })
+      return
+    }
+    if (ruleError) {
+      setStep(6)
+      toast({ kind: 'error', title: 'Check the business rules', description: ruleError })
+      return
+    }
+    if (repoError || docsError) {
+      setStep(7)
+      toast({ kind: 'error', title: 'Check the links', description: repoError ?? docsError ?? undefined })
+      return
+    }
     setSubmitting(true)
     try {
-      const project = await createProject({
-        name: basic.name,
+      const payload = {
+        name: basic.name.trim(),
         description: basic.description,
         purpose: basic.purpose,
         type: basic.type,
@@ -121,33 +235,64 @@ export default function NewProjectPage() {
         environments: env,
         browsers: env.browsers,
         platforms: env.platforms,
-        businessRules: rules.map((r, i) => ({ id: `br-${Date.now()}-${i}`, title: r.title, description: r.description })),
+        businessRules: rules.map((r, i) => ({ id: r.id ?? `br-${Date.now()}-${i}`, title: r.title, description: r.description })),
         testingTools: [...quality.testingTools, ...quality.frameworks],
         conventions: quality.conventions,
         constraints: quality.constraints,
-        repoUrl: quality.repoUrl || undefined,
-        docsUrl: quality.docsUrl || undefined,
-        memberIds: [currentUser.id],
+        repoUrl: quality.repoUrl,
+        docsUrl: quality.docsUrl,
+        memberIds: [...new Set([currentUser.id, ...teamIds])],
+      }
+      if (isEdit && editId) {
+        const project = await updateProject(editId, payload)
+        toast({ kind: 'success', title: 'Project updated', description: `${payload.name} configuration saved.` })
+        navigate(`/projects/${project.id}`)
+      } else {
+        const project = await createProject(payload)
+        toast({ kind: 'success', title: 'Project created', description: `${basic.name} is ready. Add bugs to begin.` })
+        navigate(`/projects/${project.id}`)
+      }
+    } catch (err) {
+      toast({
+        kind: 'error',
+        title: isEdit ? 'Could not save changes' : 'Could not create project',
+        description: errorMessage(err),
       })
-      toast({ kind: 'success', title: 'Project created', description: `${basic.name} is ready. Add bugs to begin.` })
-      navigate(`/projects/${project.id}`)
-    } catch {
-      toast({ kind: 'error', title: 'Could not create project', description: 'Please try again.' })
       setSubmitting(false)
     }
   }
-  const back = () => (step > 1 ? setStep(step - 1) : navigate('/projects'))
+  const back = () => (step > 1 ? setStep(step - 1) : navigate(editId ? `/projects/${editId}` : '/projects'))
 
-  const updateTeam = (i: number, patch: Partial<TeamRow>) =>
-    setTeam((p) => p.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
+  const teamMembers = teamIds
+    .map((id) => members.find((m) => m.id === id))
+    .filter((m): m is Member => Boolean(m))
+  const availableEmployees = members.filter((m) => !teamIds.includes(m.id) && m.status !== 'Invited')
+  const addQueryTrimmed = addQuery.trim().toLowerCase()
+  const filteredEmployees = addQueryTrimmed
+    ? availableEmployees.filter(
+      (m) =>
+        m.name.toLowerCase().includes(addQueryTrimmed) ||
+        m.email.toLowerCase().includes(addQueryTrimmed),
+    )
+    : availableEmployees
+  const addSelected = (m: Member) => {
+    setTeamIds((p) => [...p, m.id])
+    setAddOpen(false)
+    setAddQuery('')
+  }
+
   const updateRule = (i: number, patch: Partial<Rule>) =>
     setRules((p) => p.map((r, idx) => (idx === i ? { ...r, ...patch } : r)))
 
   return (
     <div className="mx-auto max-w-5xl space-y-6 p-4 sm:p-6">
       <PageHeader
-        title="Create Project"
-        description="Configure the AI's knowledge base for this project — not just a folder."
+        title={isEdit ? `Edit ${editing?.name ?? 'Project'}` : 'Create Project'}
+        description={
+          isEdit
+            ? 'Update the configuration the AI uses as this project\'s knowledge base.'
+            : "Configure the AI's knowledge base for this project - not just a folder."
+        }
       />
 
       <div className="grid gap-6 md:grid-cols-[220px_1fr]">
@@ -193,7 +338,7 @@ export default function NewProjectPage() {
 
             {step === 1 && (
               <StepShell title="Basic Information" desc="Identify the project and its purpose.">
-                <div><Label>Project name</Label><Input value={basic.name} onChange={(e) => setBasic({ ...basic, name: e.target.value })} /></div>
+                <div><Label htmlFor="project-name">Project name</Label><Input id="project-name" value={basic.name} onChange={(e) => setBasic({ ...basic, name: e.target.value })} aria-invalid={Boolean(nameError)} /><FieldHint>At least 2 characters - shown everywhere in the app.</FieldHint><FieldError>{nameError}</FieldError></div>
                 <div><Label>Brief description</Label><Textarea value={basic.description} onChange={(e) => setBasic({ ...basic, description: e.target.value })} /></div>
                 <div><Label>Project purpose</Label><Textarea value={basic.purpose} onChange={(e) => setBasic({ ...basic, purpose: e.target.value })} /><FieldHint>What problem does this project solve? The AI uses this for context.</FieldHint></div>
                 <div><Label>Project type</Label>
@@ -213,7 +358,6 @@ export default function NewProjectPage() {
                   ['APIs / Services', 'services'],
                   ['Authentication', 'auth'],
                   ['Deployment', 'deployment'],
-                  ['Other technologies', 'other'],
                 ] as const).map(([label, key]) => (
                   <div key={key}>
                     <Label>{label}</Label>
@@ -224,20 +368,103 @@ export default function NewProjectPage() {
             )}
 
             {step === 3 && (
-              <StepShell title="Team" desc={`${team.length} members on this project.`}>
-                <div className="space-y-2">
-                  {team.map((row, i) => (
-                    <div key={i} className="flex items-center gap-2">
-                      <Input value={row.name} onChange={(e) => updateTeam(i, { name: e.target.value })} placeholder="Member name" className="flex-1" />
-                      <Select value={row.role} onChange={(e) => updateTeam(i, { role: e.target.value as Role })} className="w-36">
-                        <option>Developer</option><option>QA</option><option>Other</option>
-                      </Select>
-                      <button onClick={() => setTeam((p) => p.filter((_, idx) => idx !== i))} className="rounded-lg border border-border p-2 text-muted-foreground hover:text-error" aria-label="Remove member"><Trash2 className="size-4" /></button>
-                    </div>
-                  ))}
-                </div>
-                <button onClick={() => setTeam((p) => [...p, { name: '', role: 'Developer' }])} className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm font-medium text-muted-foreground hover:border-indigo hover:text-indigo"><Plus className="size-4" />Add member</button>
-              </StepShell>
+              <>
+                {addOpen &&
+                  createPortal(
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setAddOpen(false)}>
+                      <div className="w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+                        <Card>
+                          <CardHeader className="flex flex-row items-center justify-between !py-4">
+                            <CardTitle>Add team member</CardTitle>
+                            <button onClick={() => setAddOpen(false)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted" aria-label="Close">
+                              <X className="size-4" />
+                            </button>
+                          </CardHeader>
+                          <CardContent>
+                            <p className="mb-3 text-sm text-muted-foreground">
+                              Add a registered employee by name. They&apos;ll get access to this project.
+                            </p>
+                            <Input
+                              autoFocus
+                              placeholder="Search by name or email…"
+                              value={addQuery}
+                              onChange={(e) => setAddQuery(e.target.value)}
+                              className="mb-3"
+                            />
+                            <div className="max-h-64 space-y-1 overflow-y-auto">
+                              {filteredEmployees.length === 0 ? (
+                                <p className="px-2 py-4 text-center text-sm text-muted-foreground">
+                                  {availableEmployees.length === 0
+                                    ? 'Every registered employee is already on this team.'
+                                    : 'No employee matches that name.'}
+                                </p>
+                              ) : (
+                                filteredEmployees.map((m) => (
+                                  <button
+                                    key={m.id}
+                                    onClick={() => addSelected(m)}
+                                    className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted"
+                                  >
+                                    <Avatar name={m.name} color={m.avatarColor} size="sm" />
+                                    <span className="min-w-0 flex-1">
+                                      <span className="block truncate text-sm font-medium text-foreground">{m.name}</span>
+                                      <span className="block truncate text-xs text-muted-foreground">{m.email}</span>
+                                    </span>
+                                    <span className={cn('inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium', roleBadge[m.role])}>
+                                      {m.role}
+                                    </span>
+                                  </button>
+                                ))
+                              )}
+                            </div>
+                          </CardContent>
+                        </Card>
+                      </div>
+                    </div>,
+                    document.body,
+                  )}
+
+                <StepShell title="Team" desc={`${teamMembers.length} registered employee${teamMembers.length === 1 ? '' : 's'} selected for this project.`}>
+                  <div className="space-y-2">
+                    {teamMembers.map((m) => (
+                      <div key={m.id} className="flex items-center gap-2.5 rounded-lg border border-border px-3 py-2">
+                        <Avatar name={m.name} color={m.avatarColor} size="sm" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">{m.name}</span>
+                          <span className="block truncate text-xs text-muted-foreground">{m.email}</span>
+                        </span>
+                        <span className={cn('inline-flex shrink-0 rounded-full border px-2 py-0.5 text-xs font-medium', roleBadge[m.role])}>
+                          {m.role}
+                        </span>
+                        <button
+                          onClick={() => setTeamIds((p) => p.filter((id) => id !== m.id))}
+                          className="rounded-lg p-1.5 text-muted-foreground hover:text-error"
+                          aria-label={`Remove ${m.name}`}
+                        >
+                          <Trash2 className="size-4" />
+                        </button>
+                      </div>
+                    ))}
+                    {teamMembers.length === 0 && (
+                      <p className="rounded-lg border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+                        No team members selected yet.
+                      </p>
+                    )}
+                  </div>
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        setAddQuery('')
+                        setAddOpen(true)
+                      }}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-border px-3 py-2 text-sm font-medium text-muted-foreground hover:border-indigo hover:text-indigo"
+                    >
+                      <UserPlus className="size-4" />Add member
+                    </button>
+                  )}
+                  <FieldHint>Employees are selected from members registered in this workspace.</FieldHint>
+                </StepShell>
+              </>
             )}
 
             {step === 4 && (
@@ -269,9 +496,10 @@ export default function NewProjectPage() {
                   {rules.map((r, i) => (
                     <div key={i} className="rounded-lg border border-border p-3">
                       <div className="flex items-center gap-2">
-                        <Input value={r.title} onChange={(e) => updateRule(i, { title: e.target.value })} placeholder="Rule title" className="flex-1 font-medium" />
+                        <Input value={r.title} onChange={(e) => updateRule(i, { title: e.target.value })} placeholder="Rule title" className="flex-1 font-medium" aria-invalid={Boolean(r.title.length === 0 && ruleError)} />
                         <button onClick={() => setRules((p) => p.filter((_, idx) => idx !== i))} className="rounded-lg border border-border p-2 text-muted-foreground hover:text-error" aria-label="Remove rule"><Trash2 className="size-4" /></button>
                       </div>
+                      {!r.title.trim() && <FieldError>{ruleError}</FieldError>}
                       <Textarea value={r.description} onChange={(e) => updateRule(i, { description: e.target.value })} placeholder="Describe the rule…" className="mt-2 min-h-16" />
                     </div>
                   ))}
@@ -287,14 +515,24 @@ export default function NewProjectPage() {
                 <div><Label>Coding conventions</Label><Textarea value={quality.conventions} onChange={(e) => setQuality({ ...quality, conventions: e.target.value })} /></div>
                 <div><Label>Development constraints</Label><Textarea value={quality.constraints} onChange={(e) => setQuality({ ...quality, constraints: e.target.value })} /></div>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <div><Label>Repository URL (optional)</Label><Input value={quality.repoUrl} onChange={(e) => setQuality({ ...quality, repoUrl: e.target.value })} placeholder="https://github.com/…" /></div>
-                  <div><Label>Documentation URL (optional)</Label><Input value={quality.docsUrl} onChange={(e) => setQuality({ ...quality, docsUrl: e.target.value })} placeholder="https://docs…" /></div>
+                  <div>
+                    <Label htmlFor="repo-url">Repository URL (optional)</Label>
+                    <Input id="repo-url" value={quality.repoUrl} onChange={(e) => setQuality({ ...quality, repoUrl: e.target.value })} placeholder="https://github.com/…" aria-invalid={Boolean(repoError)} />
+                    <FieldHint>Leave empty if there is no repository.</FieldHint>
+                    <FieldError>{repoError}</FieldError>
+                  </div>
+                  <div>
+                    <Label htmlFor="docs-url">Documentation URL (optional)</Label>
+                    <Input id="docs-url" value={quality.docsUrl} onChange={(e) => setQuality({ ...quality, docsUrl: e.target.value })} placeholder="https://docs…" aria-invalid={Boolean(docsError)} />
+                    <FieldHint>Leave empty if there is no documentation yet.</FieldHint>
+                    <FieldError>{docsError}</FieldError>
+                  </div>
                 </div>
               </StepShell>
             )}
 
             {step === 8 && (
-              <StepShell title="Review" desc="Confirm the project context before creating.">
+              <StepShell title="Review" desc={isEdit ? 'Confirm the project context before saving.' : 'Confirm the project context before creating.'}>
                 <div className="space-y-3">
                   <ReviewRow label="Name" value={basic.name} />
                   <ReviewRow label="Type" value={basic.type} />
@@ -304,7 +542,7 @@ export default function NewProjectPage() {
                   <ReviewChips label="Backend" items={tech.backend} />
                   <ReviewChips label="Database" items={tech.database} />
                   <ReviewChips label="Auth" items={tech.auth} />
-                  <ReviewRow label="Team" value={team.map((t) => `${t.name} (${t.role})`).join(', ')} />
+                  <ReviewRow label="Team" value={teamMembers.map((m) => `${m.name} (${m.role})`).join(', ')} />
                   <ReviewRow label="Architecture" value={arch.style} />
                   <ReviewChips label="Modules" items={arch.modules} />
                   <div className="rounded-lg border border-border p-3">
@@ -313,7 +551,7 @@ export default function NewProjectPage() {
                       {rules.map((r, i) => (
                         <li key={i} className="text-sm text-foreground">
                           <span className="font-medium">{r.title || 'Untitled rule'}</span>
-                          {r.description && <span className="text-muted-foreground"> — {r.description}</span>}
+                          {r.description && <span className="text-muted-foreground"> - {r.description}</span>}
                         </li>
                       ))}
                     </ul>
@@ -329,7 +567,7 @@ export default function NewProjectPage() {
             <div className="flex items-center justify-between border-t border-border pt-4">
               <button onClick={back} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"><ArrowLeft className="size-4" />Back</button>
               <button onClick={next} disabled={submitting} className="inline-flex items-center gap-1.5 rounded-lg bg-indigo px-4 py-2 text-sm font-medium text-white shadow-sm transition-colors hover:bg-indigo/90 disabled:opacity-50">
-                {step === 8 ? 'Create Project' : 'Continue'}
+                {step === 8 ? (isEdit ? 'Save Changes' : 'Create Project') : 'Continue'}
                 {step !== 8 && <ArrowRight className="size-4" />}
               </button>
             </div>
@@ -356,7 +594,7 @@ function ReviewRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="grid grid-cols-[110px_1fr] gap-3 border-b border-border pb-2 text-sm">
       <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="text-foreground">{value || '—'}</span>
+      <span className="text-foreground">{value || '-'}</span>
     </div>
   )
 }
@@ -365,7 +603,7 @@ function ReviewChips({ label, items }: { label: string; items: string[] }) {
   return (
     <div className="grid grid-cols-[110px_1fr] gap-3 border-b border-border pb-2 text-sm">
       <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-      <span className="flex flex-wrap gap-1">{items.length ? items.map((t) => <Chip key={t}>{t}</Chip>) : '—'}</span>
+      <span className="flex flex-wrap gap-1">{items.length ? items.map((t) => <Chip key={t}>{t}</Chip>) : '-'}</span>
     </div>
   )
 }

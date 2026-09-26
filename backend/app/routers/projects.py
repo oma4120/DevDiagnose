@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.db import get_store
 from app.deps import get_current_user
-from app.schemas import ProjectCreate, ProjectMemberAdd, allocate_id
+from app.schemas import ProjectCreate, ProjectMemberAdd, ProjectPatch, allocate_id
 from app.types import Project
 
 router = APIRouter(prefix="/projects", tags=["projects"])
@@ -72,3 +72,34 @@ def create_project(payload: ProjectCreate) -> dict:
     ).model_dump(mode="json")
     store.insert("projects", doc)
     return doc
+
+
+@router.patch("/{project_id}")
+def update_project(
+    project_id: str,
+    payload: ProjectPatch,
+    user: dict = Depends(get_current_user),
+) -> dict:
+    """Admin-only: edit project configuration (the AI knowledge base)."""
+    if user.get("role") != "Admin":
+        raise HTTPException(status_code=403, detail="Admins can edit project configuration")
+    store = get_store()
+    store.seed_if_empty()
+    project = store.find_one("projects", project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail=f"Project {project_id} not found")
+
+    updates = payload.model_dump(exclude_none=True)
+    if "memberIds" in updates:
+        known = {m["id"] for m in store.find_all("members")}
+        unknown = [mid for mid in updates["memberIds"] if mid not in known]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown team members: {', '.join(unknown)}",
+            )
+
+    project.update(updates)
+    project["updatedAt"] = "just now"
+    store.replace("projects", project)
+    return project
