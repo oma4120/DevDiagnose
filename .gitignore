@@ -1,0 +1,26 @@
+# Environment variables
+.env*.local
+
+# Common ignores
+node_modules
+.next/
+.DS_Store
+
+# Root
+dist/
+
+# Frontend (React + Vite)
+frontend/node_modules/
+frontend/dist/
+frontend/.env*.local
+
+# Backend (FastAPI)
+backend/.env
+backend/.venv/
+backend/data/
+
+# Python
+__pycache__/
+*.pyc
+
+tsconfig.tsbuildinfo
