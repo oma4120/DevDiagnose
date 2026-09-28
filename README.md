@@ -4,7 +4,7 @@ AI-powered internal bug analysis and tracking platform for software engineering
 teams. Reports come in, the AI diagnoses root cause + suggested fixes, and QA/Dev
 drive bugs through a kanban workflow to resolution.
 
-Monorepo: **React + Vite (Tailwind v4) frontend** and a **FastAPI + MongoDB
+Monorepo: **React + Vite (Tailwind) frontend** and a **FastAPI + MongoDB
 Atlas backend**. Both sides share the same document shapes (camelCase) so the
 frontend consumes the API 1:1.
 
@@ -174,23 +174,6 @@ python -m app.reseed
 invites and company settings, re-inserts `app/seed.py`, resets every password to
 the demo password and recomputes the project bug counters.
 
-### Demo accounts
-
-Every account uses the password **`demo1234`**.
-
-| Name            | Email                     | Role      | On projects |
-| --------------- | ------------------------- | --------- | ----------- |
-| Ahmad Tester    | `ahmad25tester@gmail.com` | Admin     | (sees all)  |
-| Omar Haddad     | `omar@northwind.dev`      | Developer | p1, p2      |
-| Sara Nasser     | `sara@northwind.dev`      | QA        | p1, p3      |
-| Layla Fahmi     | `layla@northwind.dev`     | Developer | p1          |
-| Karim Mansour   | `karim@northwind.dev`     | Developer | p1, p2      |
-| Rami Boulos     | `rami@northwind.dev`      | Developer | p1, p2, p3  |
-| Hind Barakat    | `hind@northwind.dev`      | QA        | (no team)   |
-
-Workspace: **Northwind Labs** (`northwind`), 3 projects, 11 demo bugs covering
-the whole status flow.
-
 ## Using the app
 
 1. **Sign in** at `/login` with a demo account.
@@ -209,28 +192,6 @@ the whole status flow.
    `/invite/<token>` link; `/company` sets name, workspace slug, QA toggle, logo.
 9. **Settings** - change your password (rules are checked live).
 10. **Invite link** - open `/invite/<token>` to set name + password, then log in.
-
-## Input validation
-
-The same rules run on the client (fast feedback) and on the API (authoritative
-422 responses with a readable `msg`).
-
-| Field | Rule |
-| ----- | ---- |
-| Bug title | required, 4-200 chars |
-| Bug description | required, 10-20000 chars |
-| Steps to reproduce | at most 50 items |
-| Comment body | 1-5000 chars |
-| Project / company name | 2-80 chars |
-| Workspace slug | `^[a-z0-9]+(?:-[a-z0-9]+)*$`, 3-40 chars (friendly 422) |
-| Email | `^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$` (stored lowercased) |
-| `repoUrl` / `docsUrl` | must start with `http://` or `https://`; `""` clears it |
-| Business rules | each entry needs a non-empty title |
-| Evidence image | `data:image/...` URL, max 1.5 MB; company logo max 2 MB |
-| Password | 8+ chars with uppercase, a number and a symbol |
-
-Failed field validation returns `422` with FastAPI's `detail` array; the client
-surfaces the first message per field and also shows API errors inline.
 
 ## API reference
 
