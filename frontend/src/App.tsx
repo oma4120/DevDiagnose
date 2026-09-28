@@ -18,9 +18,23 @@ import CompanyPage from '@/pages/company'
 import EmployeesPage from '@/pages/employees'
 
 function RequireAuth() {
-  const { isAuthenticated, ready } = useData()
+  const { isAuthenticated, ready, bootstrapError } = useData()
   const location = useLocation()
   if (!ready) return null
+  if (bootstrapError) {
+    // Rendering null here used to leave a permanently blank screen.
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background px-6">
+        <div className="max-w-md space-y-2 text-center">
+          <h1 className="text-lg font-semibold text-foreground">Could not load your workspace</h1>
+          <p className="text-sm text-muted-foreground">{bootstrapError}</p>
+          <p className="text-sm text-muted-foreground">
+            Is the API running, and is it reachable from this page?
+          </p>
+        </div>
+      </div>
+    )
+  }
   if (!isAuthenticated) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
   }

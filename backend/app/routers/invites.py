@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.auth import hash_password
 from app.db import get_store
-from app.invites import find_invite_by_token, invite_status_of, now_iso
+from app.invites import claim_invite, find_invite_by_token, invite_status_of, now_iso
 from app.schemas import InviteAccept, allocate_id
 
 router = APIRouter(prefix="/invites", tags=["invites"])
@@ -64,6 +64,15 @@ def accept_invite(payload: InviteAccept) -> dict:
     first = payload.firstName.strip()
     last = payload.lastName.strip()
     existing = store.find_all("members")
+
+    # Claim the invite before creating the member: a single conditional update,
+    # so two simultaneous accepts cannot both get through.
+    if not claim_invite(store, invite):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="Invitation already used or no longer pending.",
+        )
+
     doc = {
         "id": allocate_id("u", [m["id"] for m in existing]),
         "name": f"{first} {last}".strip(),
@@ -82,6 +91,6 @@ def accept_invite(payload: InviteAccept) -> dict:
         "inviteExpiresAt": None,
     }
     store.insert("members", doc)
-    store.replace("invites", {**invite, "status": "accepted", "acceptedAt": now_iso(), "memberId": doc["id"]})
+    store.patch("invites", invite["id"], {"memberId": doc["id"]})
 
     return {"accepted": True, "email": email}

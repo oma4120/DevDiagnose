@@ -9,7 +9,6 @@ from app.types import (
     Bug,
     BugStatus,
     Category,
-    Comment,
     Evidence,
     EvidenceType,
     MemberRole,
@@ -23,8 +22,13 @@ from app.types import (
 # --- input rules (mirrored in the frontend so users see errors inline) -----
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$")
 URL_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
+# The workspace becomes a URL segment, so it must be slug-safe. Mirrors SLUG_RE
+# in frontend/src/lib/validation.ts.
+SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 MAX_DESCRIPTION = 20_000
 MAX_DATA_URL = 1_500_000  # ~1.5 MB for pasted/attached image evidence
+MAX_LOGO_DATA_URL = 2_000_000  # company logo
+MAX_URL = 500  # repoUrl / docsUrl, mirrored by RULES.repoUrl.max in the frontend
 
 
 def _text(value: str, label: str, minimum: int = 1, maximum: int | None = None) -> str:
@@ -52,6 +56,10 @@ def _url(value: str | None, label: str) -> str | None:
     text = value.strip()
     if text and not URL_RE.match(text):
         raise ValueError(f"{label} must start with http:// or https://")
+    # The frontend caps these at 500 characters (RULES.repoUrl.max); without the
+    # same limit here a long link is accepted by the API but rejected by the form.
+    if len(text) > MAX_URL:
+        raise ValueError(f"{label} must be at most {MAX_URL} characters")
     return text
 
 
@@ -110,9 +118,9 @@ class BugCreate(ReqModel):
     environment: str = ""
     browserDevice: str = ""
     evidence: list[EvidenceIn] = []
-    reporterId: str = "u1"
     assigneeIds: list[str] = []
-    status: BugStatus = "Submitted"
+    # No `reporterId` and no `status`: both are derived from the authenticated
+    # caller and the workflow, never taken from the request body.
 
     @field_validator("title", mode="after")
     @classmethod
@@ -139,19 +147,21 @@ class BugCreate(ReqModel):
 
 
 class CommentIn(ReqModel):
-    authorKind: Comment.AuthorKind = "Developer"
-    authorName: str = "Omar Haddad"
+    """A comment body only.
+
+    `authorName` and `authorKind` used to be accepted here, which let any
+    caller post as another member or forge an `AI` comment (AI comments are
+    filtered out of the analysis prompt, so forging one suppressed real
+    context). Both are now derived from the authenticated user; extra keys in
+    the body are ignored rather than trusted.
+    """
+
     body: str
 
     @field_validator("body", mode="after")
     @classmethod
     def _clean_body(cls, value: str) -> str:
         return _text(value, "Comment", minimum=1, maximum=5_000)
-
-    @field_validator("authorName", mode="after")
-    @classmethod
-    def _clean_author(cls, value: str) -> str:
-        return _text(value, "Author name", minimum=1, maximum=60)
 
 
 class StatusUpdate(ReqModel):
@@ -488,7 +498,12 @@ class CompanyUpdate(ReqModel):
     def _clean_workspace(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _text(value, "Workspace", minimum=3, maximum=40)
+        slug = _text(value, "Workspace", minimum=3, maximum=40)
+        # The form only allows lowercase letters, numbers and single hyphens, so
+        # the API must reject the same input rather than storing an unusable URL.
+        if not SLUG_RE.match(slug):
+            raise ValueError("Workspace can only use lowercase letters, numbers and hyphens (e.g. northwind)")
+        return slug
 
     @field_validator("logo", mode="after")
     @classmethod
@@ -498,6 +513,6 @@ class CompanyUpdate(ReqModel):
         logo = value.strip()
         if logo and not logo.startswith("data:image/"):
             raise ValueError("Logo must be an image data URL")
-        if len(logo) > 2_000_000:
+        if len(logo) > MAX_LOGO_DATA_URL:
             raise ValueError("Logo is too large (max ~2 MB)")
         return logo

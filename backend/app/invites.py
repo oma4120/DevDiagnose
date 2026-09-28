@@ -66,6 +66,15 @@ def find_invite_by_token(store, token: str) -> dict | None:
     return store.find_one_by("invites", "tokenHash", hash_invite_token(token))
 
 
+def claim_invite(store, invite: dict) -> bool:
+    """Flip a pending invite to `accepted` only if it is still pending.
+
+    The check and the write are a single conditional update, so two concurrent
+    accepts of the same link cannot both create an account.
+    """
+    return store.backend.claim_invite(invite["id"], now_iso())
+
+
 def invite_status_of(invite: dict) -> tuple[bool, str]:
     """Return (ok, reason) for validating an invitation link."""
     if invite.get("status") != "pending":

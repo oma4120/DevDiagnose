@@ -28,6 +28,7 @@ import { BugBoard } from '@/components/bug-board'
 import { EmptyState } from '@/components/empty-state'
 import { Input } from '@/components/ui/field'
 import { byClosedDesc, cn } from '@/lib/utils'
+import { errorMessage } from '@/lib/validation'
 import { useToast } from '@/components/ui/toast'
 import { useData, useProject, useProjectsBugStats } from '@/lib/data-context'
 import type { Member, Role } from '@/lib/types'
@@ -43,11 +44,12 @@ export default function ProjectOverviewPage() {
   const navigate = useNavigate()
   const project = useProject(params.id)
   const { toast } = useToast()
-  const { members, currentUser, hasQA, addProjectMember } = useData()
+  const { members, currentUser, hasQA, addProjectMember, updateProject } = useData()
   const [tab, setTab] = useState('overview')
   const [addOpen, setAddOpen] = useState(false)
   const [addQuery, setAddQuery] = useState('')
   const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
 
   // Same visibility rule as the projects/bugs pages (non-members see nothing).
   const { projectBugs, ...projectStats } = useProjectsBugStats(project?.id ?? '')
@@ -58,6 +60,21 @@ export default function ProjectOverviewPage() {
   const projectMembers = (project?.memberIds ?? [])
     .map((id) => members.find((m) => m.id === id))
     .filter((m): m is NonNullable<typeof m> => Boolean(m))
+
+  // Removal goes through PATCH /api/projects/{id} (Admin-only), which is the
+  // same path the project edit form uses - there is no separate endpoint.
+  const removeMember = async (memberId: string, name: string) => {
+    if (!project) return
+    setRemoving(memberId)
+    try {
+      await updateProject(project.id, { memberIds: project.memberIds.filter((id) => id !== memberId) })
+      toast({ kind: 'success', title: 'Removed from project', description: `${name} no longer has access to ${project.name}.` })
+    } catch (err) {
+      toast({ kind: 'error', title: 'Could not remove member', description: errorMessage(err) })
+    } finally {
+      setRemoving(null)
+    }
+  }
 
   if (!project) {
     return (
@@ -337,7 +354,15 @@ export default function ProjectOverviewPage() {
                       <td className="px-4 py-3 text-right font-mono text-muted-foreground">{m.resolvedBugs}</td>
                       {currentUser.role === 'Admin' && (
                         <td className="px-4 py-3 text-right">
-                          <button onClick={() => toast({ kind: 'info', title: 'Remove member?', description: `${m.name} would lose project access.` })} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-error" aria-label={`Remove ${m.name}`}><UserMinus className="size-4" /></button>
+                          <button
+                            onClick={() => removeMember(m.id, m.name)}
+                            disabled={removing === m.id}
+                            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-error disabled:opacity-50"
+                            aria-label={`Remove ${m.name} from this project`}
+                            title="Remove from project team"
+                          >
+                            <UserMinus className="size-4" />
+                          </button>
                         </td>
                       )}
                     </tr>

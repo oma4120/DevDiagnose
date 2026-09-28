@@ -25,12 +25,17 @@ export default function DashboardPage() {
 
   const total = bugs.length
   const count = (s: BugStatus) => bugs.filter((b) => b.status === s).length
-  const open = bugs.filter((b) => ['Submitted', 'Assigned'].includes(b.status)).length
+  // "Open" must mean the same thing here as it does in the project counters
+  // (status_rules.project_bug_counts) and on the project cards, otherwise the
+  // same bug can be counted as neither open nor resolved. Draft is open too.
+  const isOpen = (b: (typeof bugs)[number]) => !['Resolved', 'Closed'].includes(b.status)
+  const open = bugs.filter(isOpen).length
   const inProgress = count('In Progress')
   const awaiting = count('QA Validation')
-  const resolved = bugs.filter((b) => ['Resolved', 'Closed'].includes(b.status)).length
+  const resolved = bugs.filter((b) => !isOpen(b)).length
 
   const statusColors: Record<string, string> = {
+    Draft: '#a3a3a3',
     Submitted: '#64748b',
     Assigned: '#8b5cf6',
     'In Progress': '#3b82f6',

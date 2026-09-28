@@ -3,7 +3,6 @@ import type {
   AIAnalysis,
   Bug,
   BugStatus,
-  Comment,
   Company,
   InviteResult,
   InviteStatus,
@@ -46,10 +45,11 @@ export interface BootstrapData {
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {
   const token = getToken()
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', ...(init?.headers as Record<string, string> | undefined) }
   if (token) headers.Authorization = `Bearer ${token}`
 
-  const res = await fetch(`${API_BASE}${path}`, { headers, ...init })
+  // `init` is spread first so a caller-supplied header cannot drop Authorization.
+  const res = await fetch(`${API_BASE}${path}`, { ...init, headers })
   if (res.status === 401) {
     setToken(null)
     if (window.location.pathname !== '/login') {
@@ -97,12 +97,16 @@ export const api = {
   bugs: {
     list: () => http<Bug[]>('/bugs'),
     get: (id: string) => http<Bug>(`/bugs/${id}`),
-    create: (payload: Partial<Bug>) =>
+    // `reporterId` and `status` are intentionally not sent: the API derives the
+    // reporter from the token and always starts a report at Submitted.
+    create: (payload: Omit<Partial<Bug>, 'reporterId' | 'status'>) =>
       http<Bug>('/bugs', { method: 'POST', body: JSON.stringify(payload) }),
     patch: (id: string, fields: Partial<Bug>) =>
       http<Bug>(`/bugs/${id}`, { method: 'PATCH', body: JSON.stringify(fields) }),
-    addComment: (id: string, comment: { authorKind: Comment['authorKind']; authorName: string; body: string }) =>
-      http<Bug>(`/bugs/${id}/comments`, { method: 'POST', body: JSON.stringify(comment) }),
+    // The API derives authorName/authorKind from the token, so posting as
+    // another member is not possible.
+    addComment: (id: string, body: string) =>
+      http<Bug>(`/bugs/${id}/comments`, { method: 'POST', body: JSON.stringify({ body }) }),
     analyze: (id: string) =>
       http<{ bug: Bug; analysis: AIAnalysis }>(`/bugs/${id}/analyze`, { method: 'POST' }),
     setStatus: (id: string, status: BugStatus) =>

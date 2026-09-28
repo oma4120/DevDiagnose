@@ -1,8 +1,10 @@
+import time
 from datetime import datetime
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from app.config import get_settings
 from app.db import get_store
 from app.deps import get_current_user
 from app.schemas import (
@@ -16,7 +18,17 @@ from app.schemas import (
 )
 from app.seed import current_bug_ref
 from app.services.groq import GroqAnalyzerError, run_analysis
-from app.status_rules import allowed_statuses, display_status, project_bug_counts
+from app.status_rules import (
+    allowed_statuses,
+    can_comment_on_bug,
+    can_edit_bug,
+    can_triage_bug,
+    can_view_bug,
+    display_status,
+    project_bug_counts,
+    visible_bug_ids,
+    visible_bugs,
+)
 from app.types import Bug, TimelineEntry
 
 router = APIRouter(prefix="/bugs", tags=["bugs"])
@@ -33,6 +45,25 @@ def _member_names() -> dict[str, str]:
 
 def _new_id(prefix: str, docs: list[dict]) -> str:
     return allocate_id(prefix, [d["id"] for d in docs if d.get("id", "").startswith(prefix)])
+
+
+def _project_team(store, project_id: str) -> set[str]:
+    project = store.find_one("projects", project_id or "")
+    return set(project.get("memberIds") or []) if project else set()
+
+
+def _load_visible_bug(store, bug_id: str, user: dict) -> dict:
+    """Fetch a bug the caller may see, or raise 404.
+
+    Bugs outside the caller's visible set are reported as missing so the API does
+    not confirm that an id exists.
+    """
+    bug = store.find_one("bugs", bug_id)
+    if not bug:
+        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    if not can_view_bug(user, bug, visible_bug_ids(user, store.find_all("projects"))):
+        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    return bug
 
 
 # Report content fields: editable after submitting, gated to reporter/assignees/
@@ -58,6 +89,11 @@ REPORT_LABELS = {
     "environment": "environment",
     "browserDevice": "browser/device",
 }
+
+# Triage fields: who owns the bug and how urgent it is. Gated separately from
+# report content because mis-triaging someone else's bug is as damaging as
+# rewriting it.
+TRIAGE_FIELDS = ("assigneeIds", "severity", "priority")
 
 
 def _sync_assignments(
@@ -141,19 +177,18 @@ def _recount_project(project_id: str) -> None:
 
 
 @router.get("")
-def list_bugs() -> list[dict]:
+def list_bugs(user: dict = Depends(get_current_user)) -> list[dict]:
     store = get_store()
     store.seed_if_empty()
-    return store.find_all("bugs")
+    projects = store.find_all("projects")
+    return visible_bugs(user, store.find_all("bugs"), projects)
 
 
 @router.get("/{bug_id}")
-def get_bug(bug_id: str) -> dict:
+def get_bug(bug_id: str, user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
-    bug = store.find_one("bugs", bug_id)
-    if not bug:
-        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    bug = _load_visible_bug(store, bug_id, user)
     return Bug.model_validate(bug).model_dump(mode="json")
 
 
@@ -175,20 +210,35 @@ def create_bug(payload: BugCreate, user: dict = Depends(get_current_user)) -> di
                 detail="Screenshot evidence must include an image (data:image/…).",
             )
 
+    # The reporter is always the caller: BugCreate carries no reporterId, so a
+    # report can never be filed under someone else's identity.
+    team = set(project.get("memberIds") or [])
+    unknown_assignees = [a for a in payload.assigneeIds if a not in team]
+    if unknown_assignees:
+        raise HTTPException(
+            status_code=400,
+            detail="Assignees must come from the project team",
+        )
+
     bugs = store.find_all("bugs")
     bug_id, ref = current_bug_ref(bugs)
-    names = _member_names()
-    reporter = user if payload.reporterId == user.get("id") else {"id": payload.reporterId, "name": names.get(payload.reporterId, payload.reporterId)}
-    reporter_name = reporter["name"]
+    reporter_id = user["id"]
+    reporter_name = user.get("name", reporter_id)
+
+    # A new report always starts at Submitted. There is no status field on the
+    # request body, so the workflow cannot be entered at an arbitrary stage.
+    initial_status = "Submitted"
 
     bug = Bug.model_validate(
         {
             **payload.model_dump(mode="json"),
             "id": bug_id,
             "ref": ref,
+            "reporterId": reporter_id,
+            "status": initial_status,
             "createdAt": _now(),
             "updatedAt": "just now",
-            "evidence": [build_evidence_doc(e, reporter["id"]).model_dump(mode="json") for e in payload.evidence],
+            "evidence": [build_evidence_doc(e, reporter_id).model_dump(mode="json") for e in payload.evidence],
             "comments": [],
             "analyses": [],
             "timeline": [
@@ -205,7 +255,7 @@ def create_bug(payload: BugCreate, user: dict = Depends(get_current_user)) -> di
 
     store.insert("bugs", bug)
     if bug.get("assigneeIds"):
-        _sync_assignments(bug, list(bug["assigneeIds"]), reporter, _now(), previous_ids=[])
+        _sync_assignments(bug, list(bug["assigneeIds"]), user, _now(), previous_ids=[])
     _recount_project(bug["projectId"])
     _push_notification("System", f"New bug {ref} submitted by {reporter_name}.", ref)
     return bug
@@ -215,31 +265,35 @@ def create_bug(payload: BugCreate, user: dict = Depends(get_current_user)) -> di
 def patch_bug(bug_id: str, payload: BugPatch, user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
-    bug = store.find_one("bugs", bug_id)
-    if not bug:
-        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    bug = _load_visible_bug(store, bug_id, user)
 
     updates = payload.model_dump(exclude_none=True)
+    team = _project_team(store, bug.get("projectId", ""))
 
     # --- Report editing ---------------------------------------------------
     report_edits = [k for k in REPORT_FIELDS if k in updates]
-    if report_edits:
-        project = store.find_one("projects", bug.get("projectId", ""))
-        team = set(project.get("memberIds") or []) if project else set()
-        uid = user.get("id")
-        if not (
-            user.get("role") == "Admin"
-            or uid == bug.get("reporterId")
-            or uid in set(bug.get("assigneeIds") or [])
-            or uid in team
-        ):
-            raise HTTPException(
-                status_code=403,
-                detail=(
-                    "Only the reporter, assignees, project team members, or an "
-                    "admin can edit this report."
-                ),
-            )
+    if report_edits and not can_edit_bug(user, bug, team):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Only the reporter, assignees, project team members, or an "
+                "admin can edit this report."
+            ),
+        )
+
+    # --- Triage (assignment / severity / priority) ------------------------
+    # These used to be ungated, so any signed-in user could reassign or
+    # re-prioritise any bug. QA is included: triaging is the QA role's job.
+    triage_edits = [k for k in TRIAGE_FIELDS if k in updates]
+    if triage_edits and not can_triage_bug(user, bug, team):
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Only the reporter, assignees, project team members, QA, or an "
+                "admin can change assignment, severity or priority."
+            ),
+        )
+
     # Only actual changes count: a no-op patch must not bump the revision or
     # add timeline noise.
     changed_report = [k for k in report_edits if bug.get(k) != updates[k]]
@@ -248,8 +302,6 @@ def patch_bug(bug_id: str, payload: BugPatch, user: dict = Depends(get_current_u
     )
 
     if "assigneeIds" in updates:
-        project = store.find_one("projects", bug.get("projectId", ""))
-        team = set(project.get("memberIds") or []) if project else set()
         if any(member_id not in team for member_id in updates["assigneeIds"]):
             raise HTTPException(
                 status_code=400,
@@ -456,6 +508,11 @@ def set_status(bug_id: str, payload: StatusUpdate, user: dict = Depends(get_curr
     return patch_bug(bug_id, BugPatch(status=payload.status), user)
 
 
+def _author_kind_for(role: str) -> str:
+    """Comment authorship comes from the caller's role, never the request body."""
+    return "QA" if role == "QA" else "Developer"
+
+
 @router.post("/{bug_id}/comments")
 def add_comment(
     bug_id: str,
@@ -464,16 +521,23 @@ def add_comment(
 ) -> dict:
     store = get_store()
     store.seed_if_empty()
-    bug = store.find_one("bugs", bug_id)
-    if not bug:
-        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    bug = _load_visible_bug(store, bug_id, user)
+    team = _project_team(store, bug.get("projectId", ""))
+    if not can_comment_on_bug(user, bug, team):
+        raise HTTPException(
+            status_code=403,
+            detail="Only the reporter, assignees, project team members, or an admin can comment.",
+        )
+
+    author_name = user.get("name") or user.get("id", "Unknown")
+    author_kind = _author_kind_for(user.get("role", ""))
 
     comments = list(bug.get("comments", []))
     timeline = list(bug.get("timeline", []))
     comment = {
         "id": _new_id("c", comments),
-        "authorKind": payload.authorKind,
-        "authorName": payload.authorName,
+        "authorKind": author_kind,
+        "authorName": author_name,
         "body": payload.body,
         "at": _now(),
     }
@@ -483,7 +547,7 @@ def add_comment(
             id=_new_id("t", timeline),
             kind="comment",
             label="New comment",
-            actor=payload.authorName,
+            actor=author_name,
             at=_now(),
         ).model_dump(mode="json")
     )
@@ -497,20 +561,40 @@ def add_comment(
     targets.discard(user.get("id"))
     _push_notification(
         "System",
-        f"{payload.authorName} commented on Bug {bug['ref']}.",
+        f"{author_name} commented on Bug {bug['ref']}.",
         bug["ref"],
         user_ids=sorted(targets) if targets else None,
     )
     return cleaned
 
 
+# Per-process cooldown for the AI endpoint. Enough to stop a double-click loop
+# from repeatedly billing Groq and appending a full context snapshot.
+_LAST_ANALYSIS: dict[tuple[str, str], float] = {}
+
+
+def _check_analyze_cooldown(user_id: str, bug_id: str) -> None:
+    cooldown = get_settings().analyze_cooldown_seconds
+    if cooldown <= 0:
+        return
+    key = (user_id, bug_id)
+    now = time.monotonic()
+    previous = _LAST_ANALYSIS.get(key)
+    if previous is not None and now - previous < cooldown:
+        wait = int(cooldown - (now - previous)) + 1
+        raise HTTPException(
+            status_code=429,
+            detail=f"Analysis already ran for this bug. Try again in {wait}s.",
+        )
+    _LAST_ANALYSIS[key] = now
+
+
 @router.post("/{bug_id}/analyze")
-def analyze_bug(bug_id: str) -> dict:
+def analyze_bug(bug_id: str, user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
-    bug = store.find_one("bugs", bug_id)
-    if not bug:
-        raise HTTPException(status_code=404, detail=f"Bug {bug_id} not found")
+    bug = _load_visible_bug(store, bug_id, user)
+    _check_analyze_cooldown(user["id"], bug_id)
 
     project = store.find_one("projects", bug.get("projectId", ""))
     if not project:
@@ -555,6 +639,13 @@ def analyze_bug(bug_id: str) -> dict:
     ).model_dump(mode="json")
 
     analyses.append(analysis)
+    # Keep only the most recent analyses: each one embeds a full context
+    # snapshot (description + evidence + comments), so an unbounded list would
+    # grow the document towards Mongo's 16 MB limit. `version` is still derived
+    # from the pre-trim count, so version numbers keep counting up.
+    keep = get_settings().max_analyses_per_bug
+    if 0 < keep < len(analyses):
+        analyses = analyses[-keep:]
     timeline.append(
         TimelineEntry(
             id=_new_id("t", timeline),

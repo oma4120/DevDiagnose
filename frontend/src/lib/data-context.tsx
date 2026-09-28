@@ -19,6 +19,7 @@ import type {
   Project,
   Role,
 } from '@/lib/types'
+import { canViewBug, seesAllProjects } from '@/lib/status-rules'
 
 export interface DataContextValue {
   ready: boolean
@@ -26,8 +27,8 @@ export interface DataContextValue {
   isAuthenticated: boolean
   currentUser: { id: string; name: string; email: string; avatarColor: string; role: Role }
   company: Company
+  /** Derived from company.hasQA - a single source of truth, never local state. */
   hasQA: boolean
-  setHasQA: (value: boolean) => void
   updateCompany: (payload: { name?: string; workspace?: string; hasQA?: boolean; logo?: string | null }) => Promise<Company>
   members: Member[]
   projects: Project[]
@@ -40,10 +41,10 @@ export interface DataContextValue {
   inviteMemberByEmail: (email: string, role: Role, firstName?: string, lastName?: string) => Promise<InviteResult>
   removeMember: (id: string) => Promise<void>
   addProjectMember: (projectId: string, memberId: string) => Promise<Project>
-  createBug: (payload: Partial<Bug>) => Promise<Bug>
+  createBug: (payload: Omit<Partial<Bug>, 'reporterId' | 'status'>) => Promise<Bug>
   createProject: (payload: Partial<Project>) => Promise<Project>
   updateProject: (id: string, payload: Partial<Project>) => Promise<Project>
-  addComment: (id: string, body: string, authorName?: string) => Promise<Bug>
+  addComment: (id: string, body: string) => Promise<Bug>
   updateBug: (id: string, fields: Partial<Bug>) => Promise<Bug>
   setBugStatus: (id: string, status: BugStatus) => Promise<Bug>
   assignBug: (id: string, assigneeIds: string[]) => Promise<Bug>
@@ -57,7 +58,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [authToken, setAuthToken] = useState<string | null>(() => getToken())
   const [currentUser, setCurrentUser] = useState({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
   const [company, setCompany] = useState<Company>({ name: '', workspace: '', hasQA: true, logo: null })
-  const [hasQA, setHasQA] = useState(true)
   const [members, setMembers] = useState<Member[]>([])
   const [projects, setProjects] = useState<Project[]>([])
   const [bugs, setBugs] = useState<Bug[]>([])
@@ -75,7 +75,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const data = await api.bootstrap()
       setCurrentUser(data.currentUser)
       setCompany(data.company)
-      setHasQA(data.company.hasQA !== false)
       setMembers(data.members)
       setProjects(data.projects)
       setBugs(data.bugs)
@@ -105,11 +104,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setToken(null)
     setAuthToken(null)
     setCurrentUser({ id: '', name: '', email: '', avatarColor: '', role: '' as Role })
+    setCompany({ name: '', workspace: '', hasQA: true, logo: null })
     setMembers([])
     setProjects([])
     setBugs([])
     setNotifications([])
     setRecentActivity([])
+    setBootstrapError(null)
     setReady(true)
   }, [])
 
@@ -132,26 +133,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const updateCompany = useCallback(
     async (payload: { name?: string; workspace?: string; hasQA?: boolean; logo?: string | null }) => {
+      // The server response is authoritative: hasQA now lives only on `company`.
       const updated = await api.company.update(payload)
       setCompany(updated)
-      if (payload.hasQA !== undefined) setHasQA(payload.hasQA)
       return updated
     },
     [],
   )
 
-  const createBug = useCallback(
-    async (payload: Partial<Bug>) => {
-      const bug = await api.bugs.create(payload)
-      setBugs((prev) => [bug, ...prev])
-      setRecentActivity((prev) => [
-        { id: `a-${Date.now()}`, message: `Bug ${bug.ref} created by ${currentUser.name}`, at: 'just now' },
-        ...prev,
-      ])
-      return bug
-    },
-    [currentUser.name],
-  )
+  const createBug = useCallback(async (payload: Omit<Partial<Bug>, 'reporterId' | 'status'>) => {
+    const bug = await api.bugs.create(payload)
+    setBugs((prev) => [bug, ...prev])
+    return bug
+  }, [])
 
   const createProject = useCallback(async (payload: Partial<Project>) => {
     const project = await api.projects.create(payload)
@@ -165,14 +159,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return project
   }, [])
 
-  const addComment = useCallback(
-    async (id: string, body: string, authorName = currentUser.name) => {
-      const bug = await api.bugs.addComment(id, { authorKind: 'Developer', authorName, body })
-      setBugs((prev) => prev.map((b) => (b.id === bug.id ? bug : b)))
-      return bug
-    },
-    [currentUser.name],
-  )
+  const addComment = useCallback(async (id: string, body: string) => {
+    // Authorship comes back from the API (derived from the token), so QA and
+    // Admin comments are no longer permanently mislabelled as Developer here.
+    const bug = await api.bugs.addComment(id, body)
+    setBugs((prev) => prev.map((b) => (b.id === bug.id ? bug : b)))
+    return bug
+  }, [])
 
   const setBugStatus = useCallback(async (id: string, status: BugStatus) => {
     const bug = await api.bugs.setStatus(id, status)
@@ -192,18 +185,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return bug
   }, [])
 
-  const analyzeBug = useCallback(
-    async (id: string) => {
-      const { bug, analysis } = await api.bugs.analyze(id)
-      setBugs((prev) => prev.map((b) => (b.id === bug.id ? bug : b)))
-      setNotifications((prev) => [
-        { id: `n-${Date.now()}`, category: 'AI', message: `AI analysis completed for ${bug.ref}.`, at: 'just now', read: false, bugRef: bug.ref },
-        ...prev,
-      ])
-      return analysis
-    },
-    [],
-  )
+  const analyzeBug = useCallback(async (id: string) => {
+    // The API already creates the "AI analysis completed" notification, so no
+    // local copy is injected here - it used to show up twice until a refresh.
+    const { bug, analysis } = await api.bugs.analyze(id)
+    setBugs((prev) => prev.map((b) => (b.id === bug.id ? bug : b)))
+    return analysis
+  }, [])
 
   const markAllNotificationsRead = useCallback(
     () => api.notifications.markAllRead().then((list) => {
@@ -221,8 +209,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         isAuthenticated: Boolean(authToken),
         currentUser,
         company,
-        hasQA,
-        setHasQA,
+        hasQA: company.hasQA !== false,
         updateCompany,
         members,
         projects,
@@ -275,28 +262,33 @@ export function useProject(id: string | undefined) {
 }
 
 /**
- * Projects the current role may open. Admins see everything;
- * QA and Developers are scoped to projects they are a member of.
+ * Projects the current role may open. Admin and QA see everything; Developers
+ * are scoped to projects they are a member of.
  */
 export function useVisibleProjects(role: string): Project[] {
   const { projects, currentUser } = useData()
-  if (role === 'Admin') return projects
+  if (seesAllProjects(role as Role)) return projects
   return projects.filter((p) => p.memberIds.includes(currentUser.id))
 }
 
-/** Bugs the current role may see - all colleagues' bugs within visible projects. */
+/**
+ * Bugs the current role may see: everything in a visible project, plus any bug
+ * the caller reported or is assigned to. Mirrors the server scope, so a bug the
+ * API returns is never filtered away here (notably for someone removed from a
+ * team, and for QA).
+ */
 export function useVisibleBugs(role: string): Bug[] {
-  const { bugs } = useData()
+  const { bugs, currentUser } = useData()
+  if (seesAllProjects(role as Role)) return bugs
   const visibleIds = new Set(useVisibleProjects(role).map((p) => p.id))
-  if (role === 'Admin') return bugs
-  return bugs.filter((b) => visibleIds.has(b.projectId))
+  return bugs.filter((b) => canViewBug(b, currentUser.id, visibleIds))
 }
 
 export function useBug(id: string | undefined) {
   const { currentUser, bugs } = useData()
   const visible = useVisibleBugs(currentUser.role)
   if (!id) return undefined
-  // The bug list is scoped to the caller's projects, so an id outside that set
+  // The bug list is scoped to what the caller may read, so an id outside that set
   // resolves to nothing (same rule as the bugs page).
   return visible.some((b) => b.id === id) ? bugs.find((b) => b.id === id) : undefined
 }

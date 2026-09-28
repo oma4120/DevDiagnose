@@ -7,9 +7,7 @@ import { Input, Label, FieldHint, FieldError } from '@/components/ui/field'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { useData } from '@/lib/data-context'
-import { checkCompanyName, checkWorkspace, errorMessage } from '@/lib/validation'
-
-const MAX_LOGO_BYTES = 1_500_000
+import { checkCompanyName, checkImageDataUrl, checkWorkspace, errorMessage, RULES } from '@/lib/validation'
 
 function fileToDataUrl(file: File, max = 512): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -70,10 +68,12 @@ function Toggle({ checked, onChange, label, hint }: { checked: boolean; onChange
 
 export default function CompanyPage() {
   const { toast } = useToast()
-  const { company, currentUser, hasQA, setHasQA, updateCompany } = useData()
+  const { company, currentUser, hasQA, updateCompany } = useData()
   const [name, setName] = useState(company.name)
   const [workspace, setWorkspace] = useState(company.workspace)
   const [logo, setLogo] = useState<string | null>(company.logo ?? null)
+  // hasQA is server state; the toggle is an unsaved draft until "Save changes".
+  const [hasQADraft, setHasQADraft] = useState(hasQA)
   const [saving, setSaving] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -89,8 +89,11 @@ export default function CompanyPage() {
     if (!file) return
     try {
       const dataUrl = await fileToDataUrl(file)
-      if (dataUrl.length > MAX_LOGO_BYTES) {
-        toast({ kind: 'error', title: 'Logo too large', description: 'Pick a smaller image (it is resized to 512px, but this one is still too big).' })
+      // Same encoded-length cap the API enforces (schemas.MAX_LOGO_DATA_URL), so
+      // a logo the form accepts is not rejected on submit.
+      const sizeError = checkImageDataUrl(dataUrl, 'Logo', RULES.companyLogo.max)
+      if (sizeError) {
+        toast({ kind: 'error', title: 'Logo too large', description: sizeError })
         return
       }
       setLogo(dataUrl)
@@ -114,7 +117,7 @@ export default function CompanyPage() {
     }
     setSaving(true)
     try {
-      await updateCompany({ name, workspace, hasQA, logo })
+      await updateCompany({ name, workspace, hasQA: hasQADraft, logo })
       toast({ kind: 'success', title: 'Company settings saved' })
     } catch (err) {
       toast({ kind: 'error', title: 'Save failed', description: errorMessage(err) })
@@ -199,7 +202,7 @@ export default function CompanyPage() {
                 stage.
               </p>
             </div>
-            <Toggle checked={hasQA} onChange={() => setHasQA(!hasQA)} label="QA members" />
+            <Toggle checked={hasQADraft} onChange={() => setHasQADraft(!hasQADraft)} label="QA members" />
           </div>
 
           <div className="border-t border-border pt-4">

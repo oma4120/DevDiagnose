@@ -19,7 +19,7 @@ import { EmptyState } from '@/components/empty-state'
 import { cn } from '@/lib/utils'
 import { useToast } from '@/components/ui/toast'
 import { useData, useVisibleProjects } from '@/lib/data-context'
-import { checkLength, errorMessage, RULES } from '@/lib/validation'
+import { checkImageDataUrl, checkLength, errorMessage, RULES } from '@/lib/validation'
 import type { Category, EvidenceType, Priority, Severity } from '@/lib/types'
 
 const evidenceTypes: EvidenceType[] = [
@@ -135,6 +135,13 @@ export default function NewBugPage() {
     if (!file) return
     try {
       const dataUrl = await readImageFile(file)
+      // Check the encoded length here rather than discovering it as a 422 after
+      // the whole report has been submitted.
+      const sizeError = checkImageDataUrl(dataUrl, 'Screenshot')
+      if (sizeError) {
+        toast({ kind: 'error', title: 'Image too large', description: sizeError })
+        return
+      }
       setDraft((d) => ({ ...d, fileUrl: dataUrl }))
     } catch (err) {
       toast({ kind: 'error', title: 'Could not attach image', description: err instanceof Error ? err.message : undefined })
@@ -206,9 +213,9 @@ export default function NewBugPage() {
           addedBy: currentUser.id,
           addedAt: 'just now',
         })),
-        reporterId: currentUser.id,
+        // reporterId and status are set by the API from the token and the
+        // workflow - sending them here is ignored.
         assigneeIds: [],
-        status: 'Submitted',
       })
       toast({
         kind: 'success',

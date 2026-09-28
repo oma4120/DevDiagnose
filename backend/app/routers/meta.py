@@ -5,6 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from app.db import get_store, public_user
 from app.deps import get_current_user
 from app.schemas import CompanyUpdate
+from app.status_rules import (
+    sees_all_projects,
+    visible_activity,
+    visible_bugs,
+    visible_notifications,
+    visible_projects,
+)
 
 router = APIRouter(tags=["meta"])
 
@@ -14,8 +21,26 @@ private = APIRouter(tags=["meta"])
 @router.get("/health")
 def health() -> dict:
     store = get_store()
-    backend = "mongo" if store.backend.__class__.__name__ == "MongoStore" else "memory"
-    return {"status": "ok", "backend": backend, "seeded": store.seeded}
+    return {"status": "ok", "backend": "mongo", "seeded": store.seeded}
+
+
+def _visible_members(user: dict, members: list[dict], projects: list[dict], bugs: list[dict]) -> list[dict]:
+    """Enough of the directory to render names, without exposing the whole roster.
+
+    Admin and QA get everyone. Everyone else gets themselves plus the people on
+    their visible projects and the people attached to bugs they can read, which
+    covers assignee avatars and the reporter/assignee lookups on a bug page.
+    """
+    if sees_all_projects(user.get("role", "")):
+        return members
+    keep = {user.get("id")}
+    for project in projects:
+        keep.update(project.get("memberIds") or [])
+    for bug in bugs:
+        keep.add(bug.get("reporterId"))
+        keep.update(bug.get("assigneeIds") or [])
+    keep.discard(None)
+    return [m for m in members if m["id"] in keep]
 
 
 @private.get("/bootstrap")
@@ -23,15 +48,23 @@ def bootstrap(user: dict = Depends(get_current_user)) -> dict:
     store = get_store()
     store.seed_if_empty()
     member = store.find_one("members", user["id"])
-    current_user = public_user(member) if member else public_user(store.current_user())
+    if not member:
+        raise HTTPException(status_code=401, detail="User not found")
+
+    all_projects = store.find_all("projects")
+    projects = visible_projects(user, all_projects)
+    bugs = visible_bugs(user, store.find_all("bugs"), all_projects)
+
     return {
-        "currentUser": current_user,
+        "currentUser": public_user(member),
         "company": store.company(),
-        "members": [public_user(m) for m in store.find_all("members")],
-        "projects": store.find_all("projects"),
-        "bugs": store.find_all("bugs"),
-        "notifications": store.find_all("notifications"),
-        "recentActivity": store.find_all("recentActivity"),
+        "members": [public_user(m) for m in _visible_members(user, store.find_all("members"), projects, bugs)],
+        "projects": projects,
+        "bugs": bugs,
+        # Both feeds used to be returned whole, which leaked bug titles, reporter
+        # names and company activity to members who cannot see those bugs.
+        "notifications": visible_notifications(user, store.find_all("notifications"), bugs),
+        "recentActivity": visible_activity(user, store.find_all("recentActivity")),
     }
 
 

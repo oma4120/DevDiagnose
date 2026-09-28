@@ -14,20 +14,25 @@ from app.config import get_settings
 logger = logging.getLogger("devdiagnose.mail")
 
 
-def _render_invite(name: str, invite_url: str) -> tuple[str, str]:
-    subject = f"You've been invited to DevDiagnose"
+def _render_invite(name: str, invite_url: str) -> tuple[str, str, str]:
+    settings = get_settings()
+    hours = settings.invite_ttl_hours
+    # The TTL is configurable, so the copy has to read it back rather than
+    # promising "72 hours" when the setting says otherwise.
+    expiry = "1 hour" if hours == 1 else f"{hours} hours"
+    subject = "You've been invited to DevDiagnose"
     text = (
         f"Hi {name},\n\n"
         f"You've been invited to join your team's DevDiagnose workspace.\n\n"
         f"Set up your profile here:\n{invite_url}\n\n"
-        f"This link expires in 72 hours.\n\n"
+        f"This link expires in {expiry}.\n\n"
         f"Thanks,\nDevDiagnose"
     )
     html = (
         f"<p>Hi {name},</p>"
         f"<p>You've been invited to join your team's DevDiagnose workspace.</p>"
         f'<p><a href="{invite_url}">Set up your profile here</a></p>'
-        f"<p>This link expires in 72 hours.</p>"
+        f"<p>This link expires in {expiry}.</p>"
         f"<p>Thanks,<br>DevDiagnose</p>"
     )
     return subject, text, html

@@ -43,3 +43,31 @@ export function allowedStatuses(opts: {
   if (!isTeamMember) return []
   return DEVELOPER_TRANSITIONS[status] ?? []
 }
+
+/**
+ * Roles that may read every project and bug. Mirrors UNRESTRICTED_ROLES in
+ * backend/app/status_rules.py - QA belongs here, and the API already returns
+ * QA the full dataset.
+ */
+export const UNRESTRICTED_ROLES: Role[] = ['Admin', 'QA']
+
+export function seesAllProjects(role: Role): boolean {
+  return UNRESTRICTED_ROLES.includes(role)
+}
+
+/**
+ * Whether a bug is readable, mirroring can_view_bug on the server: membership of
+ * the bug's project, or being its reporter or an assignee (so someone removed
+ * from a team keeps the bugs they filed).
+ *
+ * `allowedProjectIds` is undefined for unrestricted roles.
+ */
+export function canViewBug(
+  bug: { projectId: string; reporterId: string; assigneeIds?: string[] },
+  userId: string,
+  allowedProjectIds?: Set<string>,
+): boolean {
+  if (allowedProjectIds === undefined) return true
+  if (allowedProjectIds.has(bug.projectId)) return true
+  return bug.reporterId === userId || (bug.assigneeIds ?? []).includes(userId)
+}

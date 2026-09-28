@@ -1,13 +1,14 @@
 import logging
+import re
 from copy import deepcopy
 from uuid import uuid4
 
 from pymongo import MongoClient
 from pymongo.errors import DuplicateKeyError, PyMongoError, ServerSelectionTimeoutError
 
-from app.auth import DEMO_PASSWORD, hash_password
+from app.auth import hash_password
 from app.config import get_settings
-from app.seed import seed_data
+from app.seed import DEMO_PASSWORD, seed_data
 
 logger = logging.getLogger("devdiagnose.db")
 
@@ -62,8 +63,18 @@ class MongoStore:
         return self._strip(doc) if doc else None
 
     def find_one_by(self, coll: str, field: str, value: str) -> dict | None:
-        doc = self._db[coll].find_one({field: {"$regex": f"^{value}$", "$options": "i"}})
+        # Escape the needle: without this, regex metacharacters in a login email
+        # or invite address change which document matches.
+        doc = self._db[coll].find_one({field: {"$regex": f"^{re.escape(value)}$", "$options": "i"}})
         return self._strip(doc) if doc else None
+
+    def claim_invite(self, invite_id: str, accepted_at: str) -> bool:
+        """Atomically move a pending invite to `accepted`; False if already claimed."""
+        result = self._db["invites"].update_one(
+            {"_id": invite_id, "status": "pending"},
+            {"$set": {"status": "accepted", "acceptedAt": accepted_at}},
+        )
+        return result.modified_count == 1
 
     def insert(self, coll: str, doc: dict) -> dict:
         self._db[coll].insert_one({"_id": doc["id"], **doc})
@@ -72,6 +83,10 @@ class MongoStore:
     def replace(self, coll: str, doc: dict) -> dict:
         self._db[coll].replace_one({"_id": doc["id"]}, {**doc, "_id": doc["id"]}, upsert=True)
         return deepcopy(doc)
+
+    def patch(self, coll: str, doc_id: str, updates: dict) -> dict | None:
+        self._db[coll].update_one({"_id": doc_id}, {"$set": updates})
+        return self.find_one(coll, doc_id)
 
     def delete_one(self, coll: str, doc_id: str) -> None:
         self._db[coll].delete_one({"_id": doc_id})
@@ -115,28 +130,82 @@ class Store:
         self._company = deepcopy(doc)
         return deepcopy(doc)
 
-    def seed_if_empty(self) -> None:
-        if self.seeded:
+    def seed_if_empty(self, force: bool = False) -> None:
+        """Load the demo dataset (when enabled) and normalize existing documents.
+
+        `force` is used by `python -m app.reseed`, which must load the demo
+        dataset regardless of the SEED_DEMO_DATA setting.
+        """
+        if self.seeded and not force:
             return
-        for coll in _COLLECTIONS:
-            if self.backend.count(coll) == 0 and coll in self._seed_payload:
-                for doc in self._seed_payload[coll]:
-                    self.backend.insert(coll, doc)
-        if self.backend.count("company") == 0:
-            self.backend.insert("company", {"id": "company", **self._seed_payload["company"]})
-        self.seeded = True
         self.migrate()
+        if force or get_settings().seed_demo_data:
+            demo_hash = hash_password(DEMO_PASSWORD)
+            for coll in _COLLECTIONS:
+                if self.backend.count(coll) == 0 and coll in self._seed_payload:
+                    for doc in self._seed_payload[coll]:
+                        if coll == "members" and not doc.get("passwordHash"):
+                            # Demo members share the demo password; real members
+                            # are only ever created by an invite acceptance.
+                            doc = {**doc, "passwordHash": demo_hash}
+                        self.backend.insert(coll, doc)
+            if self.backend.count("company") == 0:
+                self.backend.insert("company", {"id": "company", **self._seed_payload["company"]})
+            logger.info("Seeded the demo dataset (SEED_DEMO_DATA is on).")
+        else:
+            self._ensure_bootstrap_admin()
+        self.seeded = True
+
+    def _ensure_bootstrap_admin(self) -> None:
+        """Create the very first Admin when the workspace has no members.
+
+        The only other route to a member account is an invitation, and issuing
+        one requires an existing Admin - so without this a database with demo
+        seeding off would be permanently unloggable.
+        """
+        if self.backend.count("members") > 0:
+            return
+        settings = get_settings()
+        if not settings.bootstrap_admin_email or not settings.bootstrap_admin_password:
+            logger.error(
+                "No members exist and no BOOTSTRAP_ADMIN_EMAIL/BOOTSTRAP_ADMIN_PASSWORD "
+                "is configured - nobody can sign in. Set them and restart, or enable "
+                "SEED_DEMO_DATA for a local demo."
+            )
+            return
+        email = settings.bootstrap_admin_email.strip().lower()
+        doc = {
+            "id": "u1",
+            "name": settings.bootstrap_admin_name.strip() or "Admin",
+            "firstName": settings.bootstrap_admin_name.strip().split(" ")[0],
+            "lastName": " ".join(settings.bootstrap_admin_name.strip().split(" ")[1:]),
+            "email": email,
+            "role": "Admin",
+            "avatarColor": "#6366f1",
+            "status": "Active",
+            "assignedBugs": 0,
+            "resolvedBugs": 0,
+            "lastActive": "just now",
+            "passwordHash": hash_password(settings.bootstrap_admin_password),
+            "inviteTokenHash": None,
+            "inviteSentAt": None,
+            "inviteExpiresAt": None,
+            "protected": True,
+        }
+        self.backend.insert("members", doc)
+        if self.backend.count("company") == 0 and "company" in self._seed_payload:
+            self.backend.insert("company", {"id": "company", **self._seed_payload["company"]})
+        logger.info("Created the bootstrap Admin account %s", email)
 
     def migrate(self) -> None:
         """Normalize pre-existing documents to the current schema in place."""
-        hashed = hash_password(DEMO_PASSWORD)
         fallback = self._current_user.get("id", "u1")
 
         for member in self.backend.find_all("members"):
             changed = False
-            if not member.get("passwordHash"):
-                member["passwordHash"] = hashed
-                changed = True
+            # A missing hash is left as-is on purpose: accounts without one
+            # cannot sign in, and overwriting them with a shared password would
+            # be a far worse outcome than requiring an admin to re-invite.
             if not member.get("status"):
                 member["status"] = "Active"
                 changed = True
@@ -150,11 +219,15 @@ class Store:
                 bug["resolvedAt"] = bug.get("updatedAt") or bug.get("createdAt") or "imported"
                 changed = True
             if bug.get("status") == "Closed":
-                bug["closedAt"] = bug.get("updatedAt") or bug.get("createdAt") or "imported"
+                # Only write when a field is actually missing, otherwise every
+                # Closed bug is rewritten on every cold start.
+                if not bug.get("closedAt"):
+                    bug["closedAt"] = bug.get("updatedAt") or bug.get("createdAt") or "imported"
+                    changed = True
                 if not bug.get("resolvedAt"):
                     bug["resolvedBy"] = bug.get("resolvedBy") or bug.get("reporterId") or fallback
-                    bug["resolvedAt"] = bug.get("resolvedAt") or bug.get("updatedAt") or bug.get("createdAt")
-                changed = True
+                    bug["resolvedAt"] = bug.get("updatedAt") or bug.get("createdAt") or "imported"
+                    changed = True
             for ev in bug.get("evidence", []):
                 if isinstance(ev, dict):
                     if "fileUrl" not in ev:
@@ -213,11 +286,18 @@ class Store:
     def replace(self, coll: str, doc: dict) -> dict:
         return self.backend.replace(coll, doc)
 
+    def patch(self, coll: str, doc_id: str, updates: dict) -> dict | None:
+        """Update specific fields without rewriting the whole document."""
+        return self.backend.patch(coll, doc_id, updates)
+
     def delete_one(self, coll: str, doc_id: str) -> None:
         self.backend.delete_one(coll, doc_id)
 
     def mark_all_read(self) -> list[dict]:
         return self.backend.mark_all_read()
+
+    def claim_invite(self, invite_id: str, accepted_at: str) -> bool:
+        return self.backend.claim_invite(invite_id, accepted_at)
 
 
 _store: Store | None = None

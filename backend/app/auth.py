@@ -7,9 +7,6 @@ import jwt
 
 from app.config import get_settings
 
-# Demo password used for all seeded users. Change to a real value in production.
-DEMO_PASSWORD = "demo1234"
-
 
 def hash_password(password: str) -> str:
     return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")

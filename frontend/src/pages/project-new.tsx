@@ -232,7 +232,13 @@ export default function NewProjectPage() {
         architecture: arch.style,
         modules: arch.modules,
         apiPatterns: arch.apiPatterns,
-        environments: env,
+        // `env` also holds browsers/platforms/os, which have their own top-level
+        // fields - sending the whole object would store them twice.
+        environments: {
+          development: env.development,
+          staging: env.staging,
+          production: env.production,
+        },
         browsers: env.browsers,
         platforms: env.platforms,
         businessRules: rules.map((r, i) => ({ id: r.id ?? `br-${Date.now()}-${i}`, title: r.title, description: r.description })),

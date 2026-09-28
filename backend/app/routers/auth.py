@@ -20,6 +20,13 @@ def login(payload: AuthRequest) -> dict:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid email or password",
         )
+    # An Invited/disabled member holds no usable credential state yet; only
+    # Active accounts may sign in.
+    if (member.get("status") or "Active") != "Active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is not active. Ask an admin to re-send your invitation.",
+        )
     token = create_token(member["id"])
     return {"token": token, "user": public_user(member)}
 

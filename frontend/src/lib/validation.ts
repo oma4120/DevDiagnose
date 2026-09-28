@@ -12,6 +12,9 @@ export const RULES = {
   comment: { min: 1, max: 5000 },
   evidenceTitle: { max: 120 },
   repoUrl: { max: 500 },
+  /** Data-URL string length caps, mirroring schemas.py MAX_DATA_URL / the logo rule. */
+  evidenceImage: { max: 1_500_000 },
+  companyLogo: { max: 2_000_000 },
 } as const
 
 export const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/
@@ -63,6 +66,17 @@ export function checkUrl(value: string, label: string): string | null {
   if (!text) return null
   if (!URL_RE.test(text)) return `${label} must start with http:// or https://`
   if (text.length > RULES.repoUrl.max) return `${label} must be at most ${RULES.repoUrl.max} characters`
+  return null
+}
+
+/**
+ * A pasted or attached image, as a data URL. The API compares the *encoded
+ * string* length, so this check has to use the same number - checking decoded
+ * bytes here would let the submit fail with a 422 after the upload.
+ */
+export function checkImageDataUrl(dataUrl: string, label = 'Image', max: number = RULES.evidenceImage.max): string | null {
+  if (!dataUrl.startsWith('data:image/')) return `${label} must be an image data URL`
+  if (dataUrl.length > max) return `${label} is too large (max ~${Math.round(max / 1_000_000 * 10) / 10} MB)`
   return null
 }
 

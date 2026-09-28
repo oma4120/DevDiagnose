@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.db import get_store, public_user
@@ -8,20 +10,24 @@ from app.schemas import MemberCreate
 
 router = APIRouter(prefix="/members", tags=["members"])
 
-_AVATAR_COLORS = ["#6366f1", "#06b6d4", "#f59e0b", "#10b981", "#3b82f6", "#ef4444"]
+
+def _now_label() -> str:
+    return datetime.now().strftime("%b %d, %Y · %H:%M")
 
 
 def _require_admin(user: dict) -> None:
     if user.get("role") != "Admin":
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admins can manage members")
-
-
-def _avatar_for(email: str) -> str:
-    return _AVATAR_COLORS[sum(email.encode("utf-8")) % len(_AVATAR_COLORS)]
+        raise HTTPException(status_code=403, detail="Admins can manage members")
 
 
 @router.get("")
-def list_members() -> list[dict]:
+def list_members(user: dict = Depends(get_current_user)) -> list[dict]:
+    """Admin-only: the full roster, including the `protected` flag.
+
+    Everyone else gets the directory they need through /api/bootstrap, which is
+    scoped to the projects they belong to.
+    """
+    _require_admin(user)
     store = get_store()
     store.seed_if_empty()
     return [public_user(m) for m in store.find_all("members")]
@@ -46,7 +52,9 @@ def invite_by_email(
 
     invite, token = new_invite_doc(store, email, str(payload.role), payload.firstName, payload.lastName)
     invite_url = build_invite_url(token)
-    email_sent = send_invite_email(email, invite_url=invite_url)
+    # Greet the invitee by the name the admin typed, not a generic "there".
+    display_name = " ".join(p for p in (payload.firstName.strip(), payload.lastName.strip()) if p)
+    email_sent = send_invite_email(email, name=display_name or "there", invite_url=invite_url)
 
     return {
         "email": email,
@@ -78,4 +86,39 @@ def delete_member(member_id: str, user: dict = Depends(get_current_user)) -> dic
         if member_id in member_ids:
             project["memberIds"] = [m for m in member_ids if m != member_id]
             store.replace("projects", project)
+
+    # Scrub every remaining reference, otherwise bugs keep pointing at a member
+    # that no longer exists: the board renders an undefined assignee, assignment
+    # history stays "active" forever, and targeted notifications address a
+    # deleted account.
+    for bug in store.find_all("bugs"):
+        changed = False
+        if bug.get("reporterId") == member_id:
+            bug["reporterId"] = "u1"
+            changed = True
+        if member_id in (bug.get("assigneeIds") or []):
+            bug["assigneeIds"] = [m for m in bug["assigneeIds"] if m != member_id]
+            changed = True
+        for key in ("resolvedBy", "validatorId"):
+            if bug.get(key) == member_id:
+                bug[key] = None
+                changed = True
+        if changed:
+            store.replace("bugs", bug)
+
+    for assignment in store.find_all("bug_assignments"):
+        if assignment.get("developerId") == member_id and assignment.get("status") == "active":
+            assignment["status"] = "removed"
+            assignment["unassignedAt"] = _now_label()
+            store.replace("bug_assignments", assignment)
+
+    for note in store.find_all("notifications"):
+        if member_id in (note.get("userIds") or []):
+            note["userIds"] = [m for m in note["userIds"] if m != member_id]
+            store.replace("notifications", note)
+
+    for invite in store.find_all("invites"):
+        if invite.get("memberId") == member_id:
+            store.delete_one("invites", invite["id"])
+
     return {"deleted": True, "id": member_id}

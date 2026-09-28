@@ -1,7 +1,14 @@
 """Demo seed data for DevDiagnose (camelCase to match the frontend types).
 
 Reset the database to this state with:  python -m app.reseed
+
+This dataset is only ever applied when SEED_DEMO_DATA is on, and the accounts it
+creates all share DEMO_PASSWORD - it must never be loaded into a real workspace.
 """
+
+# Shared password for every demo account. Lives with the demo data rather than
+# in app/auth.py so it is obviously scoped to the seed.
+DEMO_PASSWORD = "demo1234"
 
 
 def seed_data() -> dict:
