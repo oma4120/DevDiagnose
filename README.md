@@ -5,9 +5,7 @@ teams. Reports come in, the AI diagnoses root cause + suggested fixes, and QA/De
 drive bugs through a kanban workflow to resolution.
 
 Monorepo: **React + Vite (Tailwind) frontend** and a **FastAPI + MongoDB
-Atlas backend**. Both sides share the same document shapes (camelCase) so the
-frontend consumes the API 1:1.
-
+Atlas backend**.
 ## Features
 
 - **Bug reports** - guided form (title, description, steps, expected/actual,
